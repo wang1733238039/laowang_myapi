@@ -13,6 +13,17 @@ from PIL import Image
 import io
 import base64
 
+import os as _os
+
+_DEBUG = _os.environ.get("LAOWANG_MYAPI_DEBUG", "0") == "1"
+
+
+def _dlog(*args, **kwargs):
+    """调试日志开关，默认关闭。设置 LAOWANG_MYAPI_DEBUG=1 启用。"""
+    if _DEBUG:
+        print(*args, **kwargs)
+
+
 
 def _calculate_aspect_ratio(width: int, height: int) -> str:
     """计算图片的宽高比，返回最接近的预设比例"""
@@ -271,25 +282,25 @@ class ModelCompareNode:
 
         try:
             # ===== 调试信息: 输入参数详情 =====
-            print("\n[DEBUG] ModelCompareNode 执行开始 =====")
-            print(f"[INFO] 节点启用状态: {kwargs.get('node_enabled', True)}")
+            _dlog("\n[DEBUG] ModelCompareNode 执行开始 =====")
+            _dlog(f"[INFO] 节点启用状态: {kwargs.get('node_enabled', True)}")
 
             # 显示两个模型的配置
             for i in [1, 2]:
-                print(f"[MODEL] 模型{i}配置:")
-                print(f"  [URL] 基础URL{i}: {kwargs.get(f'base_url{i}', 'N/A')}")
-                print(f"  [KEY] API密钥{i}: {'已配置' if kwargs.get(f'api_key{i}') else '未配置'}")
-                print(f"  [MODEL] 模型{i}: {kwargs.get(f'model{i}', 'N/A')}")
-                print(f"  [SIZE] 图片尺寸{i}: {kwargs.get(f'img_size{i}', 'N/A')}")
-                print(f"  [COUNT] 图片数量{i}: {kwargs.get(f'img_num{i}', 'N/A')}")
+                _dlog(f"[MODEL] 模型{i}配置:")
+                _dlog(f"  [URL] 基础URL{i}: {kwargs.get(f'base_url{i}', 'N/A')}")
+                _dlog(f"  [KEY] API密钥{i}: {'已配置' if kwargs.get(f'api_key{i}') else '未配置'}")
+                _dlog(f"  [MODEL] 模型{i}: {kwargs.get(f'model{i}', 'N/A')}")
+                _dlog(f"  [SIZE] 图片尺寸{i}: {kwargs.get(f'img_size{i}', 'N/A')}")
+                _dlog(f"  [COUNT] 图片数量{i}: {kwargs.get(f'img_num{i}', 'N/A')}")
 
             # 显示输入状态
             has_images = any(kwargs.get(f"image{i}") is not None for i in range(1, 11))
             prompt = kwargs.get("prompt")
-            print("\n[DEBUG] 输入状态:")
-            print(f"  [IMAGES] 参考图片: {'有' if has_images else '无'}")
-            print(f"  [PROMPT] 提示词: {'有' if prompt else '无'}")
-            print(f"  [PROMPT] 提示词内容: {prompt[:100] if prompt else 'N/A'}{('...' if prompt and len(prompt) > 100 else '')}")
+            _dlog("\n[DEBUG] 输入状态:")
+            _dlog(f"  [IMAGES] 参考图片: {'有' if has_images else '无'}")
+            _dlog(f"  [PROMPT] 提示词: {'有' if prompt else '无'}")
+            _dlog(f"  [PROMPT] 提示词内容: {prompt[:100] if prompt else 'N/A'}{('...' if prompt and len(prompt) > 100 else '')}")
 
             # 解析输入
             task = self._parse_single_task(kwargs)
@@ -322,8 +333,8 @@ class ModelCompareNode:
                     results = future.result()
 
             # ===== 调试信息: 最终输出详情 =====
-            print("\n[DEBUG] ModelCompareNode 准备返回最终输出...")
-            print("=" * 50)
+            _dlog("\n[DEBUG] ModelCompareNode 准备返回最终输出...")
+            _dlog("=" * 50)
 
             # 处理结果
             return self._process_comparison_results(results)
@@ -422,14 +433,14 @@ class ModelCompareNode:
         }
 
         # ===== 调试信息: 模型配置详情 =====
-        print("\n[DEBUG] 模型配置详情:")
-        print(f"  [banana] banana配置: {banana_config}")
-        print(f"  [DOUBAO] Doubao配置: {doubao_config}")
-        print(f"  [TASK] 任务详情: 图片数={len(task['images'])}, 提示词长度={len(task['prompt'])}")
-        print("-" * 30)
+        _dlog("\n[DEBUG] 模型配置详情:")
+        _dlog(f"  [banana] banana配置: {banana_config}")
+        _dlog(f"  [DOUBAO] Doubao配置: {doubao_config}")
+        _dlog(f"  [TASK] 任务详情: 图片数={len(task['images'])}, 提示词长度={len(task['prompt'])}")
+        _dlog("-" * 30)
 
         # 并发执行两个模型
-        print("[INFO] 开始并发执行两个模型...")
+        _dlog("[INFO] 开始并发执行两个模型...")
         results = await asyncio.gather(
             self._execute_banana_model(task, banana_config, kwargs),
             self._execute_doubao_model(task, doubao_config),
@@ -437,15 +448,15 @@ class ModelCompareNode:
         )
 
         # ===== 调试信息: 执行结果详情 =====
-        print("\n[DEBUG] 模型执行结果:")
+        _dlog("\n[DEBUG] 模型执行结果:")
         for i, result in enumerate(results, 1):
             if isinstance(result, Exception):
-                print(f"  [ERROR] 模型{i} 执行异常: {str(result)}")
+                _dlog(f"  [ERROR] 模型{i} 执行异常: {str(result)}")
             else:
                 status = "[SUCCESS]" if result.get("success", False) else "[ERROR]"
-                print(f"  {status} 模型{i} ({'banana' if i==1 else 'Doubao'}): {result.get('info', '无信息')}")
+                _dlog(f"  {status} 模型{i} ({'banana' if i==1 else 'Doubao'}): {result.get('info', '无信息')}")
 
-        print("-" * 30)
+        _dlog("-" * 30)
 
         # 处理异常结果
         processed_results = []
@@ -531,16 +542,16 @@ class ModelCompareNode:
 
         # 调试：打印 aspect_ratio 流向与图片信息，帮助排查比例计算问题
         try:
-            print(f"[DEBUG] Comfly virtual aspect_ratio (config): {config.get('aspect_ratio')}")
-            print(f"[DEBUG] Comfly virtual aspect_ratio (virtual_kwargs): {virtual_kwargs.get('aspect_ratio')}")
+            _dlog(f"[DEBUG] Comfly virtual aspect_ratio (config): {config.get('aspect_ratio')}")
+            _dlog(f"[DEBUG] Comfly virtual aspect_ratio (virtual_kwargs): {virtual_kwargs.get('aspect_ratio')}")
             if task.get("images"):
                 for i, img in enumerate(task["images"], 1):
                     try:
-                        print(f"[DEBUG] Comfly task image{i} size: {img.size} mode: {img.mode}")
+                        _dlog(f"[DEBUG] Comfly task image{i} size: {img.size} mode: {img.mode}")
                     except Exception:
-                        print(f"[DEBUG] Comfly task image{i} type: {type(img)}")
+                        _dlog(f"[DEBUG] Comfly task image{i} type: {type(img)}")
             else:
-                print("[DEBUG] Comfly task has no images")
+                _dlog("[DEBUG] Comfly task has no images")
         except Exception:
             pass
 
@@ -629,7 +640,7 @@ class ModelCompareNode:
         # 打印调试信息，展示解析后的 OSS 配置（避免使用 f-string 以防解析器问题）
         try:
             debug_val = parsed_config.get("oss_config")
-            print("[DEBUG] NanoBanana parsed_config oss_config:", debug_val)
+            _dlog("[DEBUG] NanoBanana parsed_config oss_config:", debug_val)
         except Exception:
             pass
 
@@ -656,11 +667,11 @@ class ModelCompareNode:
 
     async def _execute_doubao_model(self, task: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         """执行豆包模型"""
-        print(f"[DOUBAO] 执行Doubao模型: {config.get('model', 'N/A')}")
+        _dlog(f"[DOUBAO] 执行Doubao模型: {config.get('model', 'N/A')}")
 
         # 检查模型是否启用
         if not config.get("api_enabled", True):
-            print("[DOUBAO] Doubao模型已被禁用")
+            _dlog("[DOUBAO] Doubao模型已被禁用")
             return {
                 "model": "Doubao",
                 "success": False,
@@ -705,16 +716,16 @@ class ModelCompareNode:
 
         # 调试：打印 aspect_ratio 流向与图片信息，帮助排查比例计算问题
         try:
-            print(f"[DEBUG] Doubao virtual aspect_ratio (config): {config.get('aspect_ratio')}")
-            print(f"[DEBUG] Doubao virtual aspect_ratio (virtual_kwargs): {virtual_kwargs.get('aspect_ratio')}")
+            _dlog(f"[DEBUG] Doubao virtual aspect_ratio (config): {config.get('aspect_ratio')}")
+            _dlog(f"[DEBUG] Doubao virtual aspect_ratio (virtual_kwargs): {virtual_kwargs.get('aspect_ratio')}")
             if task.get("images"):
                 for i, img in enumerate(task["images"], 1):
                     try:
-                        print(f"[DEBUG] Doubao task image{i} size: {img.size} mode: {img.mode}")
+                        _dlog(f"[DEBUG] Doubao task image{i} size: {img.size} mode: {img.mode}")
                     except Exception:
-                        print(f"[DEBUG] Doubao task image{i} type: {type(img)}")
+                        _dlog(f"[DEBUG] Doubao task image{i} type: {type(img)}")
             else:
-                print("[DEBUG] Doubao task has no images")
+                _dlog("[DEBUG] Doubao task has no images")
         except Exception:
             pass
 
@@ -771,7 +782,7 @@ class ModelCompareNode:
                     banana_status = 3
             else:
                 # 无图片数据但有URL（URL格式）
-                print(f"[INFO] ModelCompare banana URL格式响应: {banana_result['url']}")
+                _dlog(f"[INFO] ModelCompare banana URL格式响应: {banana_result['url']}")
                 banana_image = torch.full((1, 64, 64, 3), 0.5)  # 批次格式，灰色占位符，0-1范围
                 banana_status = banana_result["status"]
         else:
@@ -793,7 +804,7 @@ class ModelCompareNode:
                     doubao_status = 3
             else:
                 # 无图片数据但有URL（URL格式）
-                print(f"[INFO] ModelCompare Doubao URL格式响应: {doubao_result['url']}")
+                _dlog(f"[INFO] ModelCompare Doubao URL格式响应: {doubao_result['url']}")
                 doubao_image = torch.full((1, 64, 64, 3), 0.5)  # 批次格式，灰色占位符，0-1范围
                 doubao_status = doubao_result["status"]
         else:
@@ -844,7 +855,7 @@ class ModelCompareNode:
 
             # 确保RGB模式
             if image.mode != "RGB":
-                print(f"[INFO] ModelCompare转换图片模式: {image.mode} -> RGB")
+                _dlog(f"[INFO] ModelCompare转换图片模式: {image.mode} -> RGB")
                 image = image.convert("RGB")
 
             # 检查图片尺寸
@@ -854,7 +865,7 @@ class ModelCompareNode:
                 return None
 
             # 转换为numpy数组，保持0-255范围
-            print(f"[INFO] ModelCompare转换图片尺寸: {width}x{height}")
+            _dlog(f"[INFO] ModelCompare转换图片尺寸: {width}x{height}")
             np_img = np.array(image)
 
             # 检查数组形状
@@ -865,7 +876,7 @@ class ModelCompareNode:
             # 转换为torch.Tensor，归一化到0-1范围，格式: [H, W, C] (ComfyUI标准格式)
             tensor = torch.from_numpy(np_img.astype(np.float32) / 255.0)
 
-            print(f"[SUCCESS] ModelCompare图片转换为torch.Tensor成功，形状: {tensor.shape}")
+            _dlog(f"[SUCCESS] ModelCompare图片转换为torch.Tensor成功，形状: {tensor.shape}")
             return tensor
 
         except Exception as e:
@@ -887,9 +898,9 @@ class ModelCompareNode:
 
 # 节点注册映射
 NODE_CLASS_MAPPINGS = {
-    "ModelCompare": ModelCompareNode
+    "laowang_ModelCompare": ModelCompareNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ModelCompare": "laowang_ModelCompare"
+    "laowang_ModelCompare": "laowang_ModelCompare"
 }

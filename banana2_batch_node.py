@@ -16,6 +16,17 @@ from PIL import Image
 import io
 import base64
 
+import os as _os
+
+_DEBUG = _os.environ.get("LAOWANG_MYAPI_DEBUG", "0") == "1"
+
+
+def _dlog(*args, **kwargs):
+    """调试日志开关，默认关闭。设置 LAOWANG_MYAPI_DEBUG=1 启用。"""
+    if _DEBUG:
+        print(*args, **kwargs)
+
+
 # OSS 上传相关导入
 try:
     import oss2
@@ -92,7 +103,7 @@ def _pil_images_to_oss_urls(
                 url = f"{scheme}://{bucket_name}.{ep}/{object_key}"
 
             urls.append(url)
-            print(f"[DEBUG] 图片{idx+1}上传成功: {url}")
+            _dlog(f"[DEBUG] 图片{idx+1}上传成功: {url}")
 
         except Exception as e:
             print(f"[ERROR] 图片{idx+1}上传失败: {str(e)}")
@@ -105,11 +116,11 @@ def _calculate_aspect_ratio(width: int, height: int) -> str:
     """计算图片的宽高比，返回最接近的NanoBanana支持的比例"""
     # 验证输入参数
     if width is None or height is None or width <= 0 or height <= 0:
-        print(f"[警告] 无效的图片尺寸 width={width}, height={height}，使用默认比例 1:1")
+        _dlog(f"[警告] 无效的图片尺寸 width={width}, height={height}，使用默认比例 1:1")
         return "1:1"
 
     ratio = width / height
-    print(f"[调试] 计算宽高比: {width}/{height} = {ratio:.6f}")
+    _dlog(f"[调试] 计算宽高比: {width}/{height} = {ratio:.6f}")
 
     # 定义NanoBanana支持的比例及其阈值
     supported_ratios = {
@@ -131,12 +142,12 @@ def _calculate_aspect_ratio(width: int, height: int) -> str:
 
     for ratio_name, target_ratio in supported_ratios.items():
         diff = abs(ratio - target_ratio)
-        print(f"[调试] 比例 {ratio_name} ({target_ratio:.6f}): 差值 = {diff:.6f}")
+        _dlog(f"[调试] 比例 {ratio_name} ({target_ratio:.6f}): 差值 = {diff:.6f}")
         if diff < min_diff:
             min_diff = diff
             best_ratio = ratio_name
 
-    print(f"[调试] 最终匹配比例: {best_ratio} (差值 = {min_diff:.6f})")
+    _dlog(f"[调试] 最终匹配比例: {best_ratio} (差值 = {min_diff:.6f})")
     return best_ratio
 
 
@@ -357,36 +368,36 @@ class GeminiBatchNode:
 
         try:
             # ===== 调试信息: 输入参数详情 =====
-            print("\n[DEBUG] Banana2Node 执行开始 =====")
-            print(f"[INFO] 节点启用状态: {kwargs.get('node_enabled', True)}")
-            print(f"[INFO] 基础URL: {kwargs.get('base_url', 'N/A')}")
-            print(f"[INFO] API密钥: {'已配置' if kwargs.get('api_key') else '未配置'}")
-            print(f"[INFO] 模型: {kwargs.get('model', 'N/A')}")
-            print(f"[INFO] 模式: {kwargs.get('mode', 'N/A')}")
-            print(f"[INFO] 宽高比: {kwargs.get('aspect_ratio', 'N/A')}")
-            print(f"[INFO] 图片尺寸: {kwargs.get('img_size', 'N/A')}")
-            print(f"[INFO] 图片数量: {kwargs.get('img_n', 'N/A')}")
-            print(f"[INFO] 种子: {kwargs.get('seed', 'N/A')}")
-            print(f"[INFO] 响应格式: {kwargs.get('response_format', 'N/A')}")
-            print(f"[INFO] 水印: {kwargs.get('watermark', 'N/A')}")
-            print(f"[INFO] 流式输出: {kwargs.get('stream', 'N/A')}")
-            print(f"[INFO] 并发数: {kwargs.get('concurrency', 'N/A')}")
-            print(f"[INFO] 超时时间: {kwargs.get('timeout', 'N/A')}")
-            print(f"[INFO] 重试次数: {kwargs.get('retry_count', 'N/A')}")
+            _dlog("\n[DEBUG] Banana2Node 执行开始 =====")
+            _dlog(f"[INFO] 节点启用状态: {kwargs.get('node_enabled', True)}")
+            _dlog(f"[INFO] 基础URL: {kwargs.get('base_url', 'N/A')}")
+            _dlog(f"[INFO] API密钥: {'已配置' if kwargs.get('api_key') else '未配置'}")
+            _dlog(f"[INFO] 模型: {kwargs.get('model', 'N/A')}")
+            _dlog(f"[INFO] 模式: {kwargs.get('mode', 'N/A')}")
+            _dlog(f"[INFO] 宽高比: {kwargs.get('aspect_ratio', 'N/A')}")
+            _dlog(f"[INFO] 图片尺寸: {kwargs.get('img_size', 'N/A')}")
+            _dlog(f"[INFO] 图片数量: {kwargs.get('img_n', 'N/A')}")
+            _dlog(f"[INFO] 种子: {kwargs.get('seed', 'N/A')}")
+            _dlog(f"[INFO] 响应格式: {kwargs.get('response_format', 'N/A')}")
+            _dlog(f"[INFO] 水印: {kwargs.get('watermark', 'N/A')}")
+            _dlog(f"[INFO] 流式输出: {kwargs.get('stream', 'N/A')}")
+            _dlog(f"[INFO] 并发数: {kwargs.get('concurrency', 'N/A')}")
+            _dlog(f"[INFO] 超时时间: {kwargs.get('timeout', 'N/A')}")
+            _dlog(f"[INFO] 重试次数: {kwargs.get('retry_count', 'N/A')}")
 
             # 显示各组的输入状态
-            print("\n[DEBUG] 各组输入状态:")
+            _dlog("\n[DEBUG] 各组输入状态:")
             for group in range(1, 11):
                 has_images = any(kwargs.get(f"image_{group}.{i}") is not None for i in range(1, 11))
                 prompt = kwargs.get(f"prompt_{group}")
-                print(f"  组{group}: 图片={has_images}, 提示词={'有' if prompt else '无'}")
+                _dlog(f"  组{group}: 图片={has_images}, 提示词={'有' if prompt else '无'}")
 
             # 解析输入参数
             config = self._parse_config(kwargs)
             tasks = self._parse_tasks(kwargs, config)
 
-            print(f"\n📊 解析结果: 共{len(tasks)}个任务, 其中{len([t for t in tasks if t['is_valid']])}个有效")
-            print("=" * 50)
+            _dlog(f"\n📊 解析结果: 共{len(tasks)}个任务, 其中{len([t for t in tasks if t['is_valid']])}个有效")
+            _dlog("=" * 50)
 
             # 过滤有效任务
             valid_tasks = [task for task in tasks if task["is_valid"]]
@@ -417,17 +428,17 @@ class GeminiBatchNode:
                     results = future.result()
 
             # ===== 调试信息: 执行结果详情 =====
-            print("\n[DEBUG] Banana2Node 执行结果汇总:")
-            print(f"  [INFO] 总任务数: {len(valid_tasks)}")
-            print(f"  [SUCCESS] 成功任务: {len([r for r in results if r.get('success', False)])}")
-            print(f"  [ERROR] 失败任务: {len([r for r in results if not r.get('success', False)])}")
+            _dlog("\n[DEBUG] Banana2Node 执行结果汇总:")
+            _dlog(f"  [INFO] 总任务数: {len(valid_tasks)}")
+            _dlog(f"  [SUCCESS] 成功任务: {len([r for r in results if r.get('success', False)])}")
+            _dlog(f"  [ERROR] 失败任务: {len([r for r in results if not r.get('success', False)])}")
 
             for i, result in enumerate(results, 1):
                 status = "[SUCCESS]" if result.get("success", False) else "[ERROR]"
-                print(f"  任务{i}: {status} {result.get('info', '无信息')}")
+                _dlog(f"  任务{i}: {status} {result.get('info', '无信息')}")
 
-            print("\n[DEBUG] 准备返回最终输出...")
-            print("=" * 50)
+            _dlog("\n[DEBUG] 准备返回最终输出...")
+            _dlog("=" * 50)
 
             # 处理结果
             return self._process_results(results)
@@ -465,12 +476,12 @@ class GeminiBatchNode:
 
         if oss_config:
             config["oss_config"] = oss_config
-            print(f"[DEBUG] OSS配置已启用: endpoint={oss_config.get('endpoint', 'N/A')}, bucket={oss_config.get('bucket_name', 'N/A')}")
+            _dlog(f"[DEBUG] OSS配置已启用: endpoint={oss_config.get('endpoint', 'N/A')}, bucket={oss_config.get('bucket_name', 'N/A')}")
         else:
-            print(f"[DEBUG] OSS配置未启用，使用base64格式")
+            _dlog(f"[DEBUG] OSS配置未启用，使用base64格式")
 
         # 调试输出配置
-        print(f"[DEBUG] 配置解析结果: {config}")
+        _dlog(f"[DEBUG] 配置解析结果: {config}")
         return config
 
     def _parse_tasks(self, kwargs, config) -> List[Dict[str, Any]]:
@@ -608,36 +619,36 @@ class GeminiBatchNode:
         api_url, headers, payload = self._build_api_request(task, config)
 
         # ===== 调试信息: API请求详情 =====
-        print(f"\n[DEBUG] 任务{task['group_id']} API请求构建:")
-        print(f"  [URL] 请求URL: {api_url}")
-        print(f"  [HEADERS] 请求头: {headers}")
-        print(f"  [PAYLOAD] 请求体类型: {type(payload)}")
-        print(f"  [IMAGES] 参考图片数量: {len(task['images'])}")
-        print(f"  [PROMPT] 提示词: {task['prompt'][:100]}{'...' if len(task['prompt']) > 100 else ''}")
-        print("-" * 30)
+        _dlog(f"\n[DEBUG] 任务{task['group_id']} API请求构建:")
+        _dlog(f"  [URL] 请求URL: {api_url}")
+        _dlog(f"  [HEADERS] 请求头: {headers}")
+        _dlog(f"  [PAYLOAD] 请求体类型: {type(payload)}")
+        _dlog(f"  [IMAGES] 参考图片数量: {len(task['images'])}")
+        _dlog(f"  [PROMPT] 提示词: {task['prompt'][:100]}{'...' if len(task['prompt']) > 100 else ''}")
+        _dlog("-" * 30)
 
         is_comfly_provider = config["provider"] == "comfly"
 
         # 发送请求
         try:
             has_images = len(task["images"]) > 0
-            print(f"[DEBUG] 任务{task['group_id']} 开始发送请求, has_images={has_images}, 图片数量={len(task['images'])}")
+            _dlog(f"[DEBUG] 任务{task['group_id']} 开始发送请求, has_images={has_images}, 图片数量={len(task['images'])}")
 
             # 检查是否使用NanoBanana API（总是使用JSON）
             is_nanobanana_local = config["provider"] in ["BW", "grsai"]
 
             if is_nanobanana_local:
                 # NanoBanana API：总是使用application/json
-                print(f"[DEBUG] 任务{task['group_id']} 使用NanoBanana JSON格式发送请求")
+                _dlog(f"[DEBUG] 任务{task['group_id']} 使用NanoBanana JSON格式发送请求")
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self.session.post(api_url, headers=headers, json=payload, timeout=config["timeout"])
                 )
             elif has_images:
                 # Comfly图生图：multipart/form-data
-                print(f"[DEBUG] 任务{task['group_id']} 使用Comfly multipart/form-data发送请求")
-                print(f"[DEBUG] data长度: {len(str(payload['data'])) if 'data' in payload else 'N/A'}")
-                print(f"[DEBUG] files数量: {len(payload['files']) if 'files' in payload else 'N/A'}")
+                _dlog(f"[DEBUG] 任务{task['group_id']} 使用Comfly multipart/form-data发送请求")
+                _dlog(f"[DEBUG] data长度: {len(str(payload['data'])) if 'data' in payload else 'N/A'}")
+                _dlog(f"[DEBUG] files数量: {len(payload['files']) if 'files' in payload else 'N/A'}")
                 request_data = payload["data"]
                 files = payload["files"]
 
@@ -655,34 +666,34 @@ class GeminiBatchNode:
                 )
             else:
                 # Comfly文生图：application/json
-                print(f"[DEBUG] 任务{task['group_id']} 使用Comfly JSON格式发送请求")
+                _dlog(f"[DEBUG] 任务{task['group_id']} 使用Comfly JSON格式发送请求")
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self.session.post(api_url, headers=headers, json=payload, timeout=config["timeout"])
                 )
 
-            print(f"[DEBUG] 任务{task['group_id']} HTTP响应状态码: {response.status_code}")
-            print(f"[DEBUG] 响应头: {dict(response.headers)}")
+            _dlog(f"[DEBUG] 任务{task['group_id']} HTTP响应状态码: {response.status_code}")
+            _dlog(f"[DEBUG] 响应头: {dict(response.headers)}")
 
             if response.status_code == 200:
-                print(f"[DEBUG] 任务{task['group_id']} 收到200响应，开始解析JSON...")
-                print(f"[DEBUG] 响应内容长度: {len(response.text)} 字符")
-                print(f"[DEBUG] Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-                print(f"[DEBUG] 原始响应文本前300字符: {response.text[:300]}")
+                _dlog(f"[DEBUG] 任务{task['group_id']} 收到200响应，开始解析JSON...")
+                _dlog(f"[DEBUG] 响应内容长度: {len(response.text)} 字符")
+                _dlog(f"[DEBUG] Content-Type: {response.headers.get('Content-Type', 'N/A')}")
+                _dlog(f"[DEBUG] 原始响应文本前300字符: {response.text[:300]}")
 
                 try:
                     result_data = response.json()
-                    print(f"[SUCCESS] 任务{task['group_id']} JSON解析成功")
-                    print(f"[DEBUG] JSON结构: {type(result_data)}")
+                    _dlog(f"[SUCCESS] 任务{task['group_id']} JSON解析成功")
+                    _dlog(f"[DEBUG] JSON结构: {type(result_data)}")
                     if isinstance(result_data, dict):
-                        print(f"[DEBUG] JSON键: {list(result_data.keys())}")
+                        _dlog(f"[DEBUG] JSON键: {list(result_data.keys())}")
 
                     # ===== 调试信息: API响应详情 =====
-                    print(f"[SUCCESS] 任务{task['group_id']} API响应成功:")
-                    print(f"  [STATUS] 响应状态码: {response.status_code}")
-                    print(f"  [RESPONSE] 响应数据: {result_data}")
-                    print(f"  [MODE] 异步模式: {config['provider'] in ['BW', 'grsai'] or (config['provider'] == 'comfly' and 'nano-banana' in config['model'])}")
-                    print("-" * 30)
+                    _dlog(f"[SUCCESS] 任务{task['group_id']} API响应成功:")
+                    _dlog(f"  [STATUS] 响应状态码: {response.status_code}")
+                    _dlog(f"  [RESPONSE] 响应数据: {result_data}")
+                    _dlog(f"  [MODE] 异步模式: {config['provider'] in ['BW', 'grsai'] or (config['provider'] == 'comfly' and 'nano-banana' in config['model'])}")
+                    _dlog("-" * 30)
                 except json.JSONDecodeError as e:
                     print(f"[ERROR] 任务{task['group_id']} JSON解析失败: {str(e)}")
                     print(f"[ERROR] 完整响应文本: {response.text}")
@@ -765,13 +776,13 @@ class GeminiBatchNode:
                 width, height = _get_image_size_with_exif(first_image)
                 if width and height:
                     final_aspect_ratio = _calculate_aspect_ratio(width, height)
-                    print(f"[AUTO] 根据输入图片({width}x{height})计算比例: {final_aspect_ratio}")
+                    _dlog(f"[AUTO] 根据输入图片({width}x{height})计算比例: {final_aspect_ratio}")
                 else:
                     final_aspect_ratio = "1:1"
-                    print("[AUTO] 无法获取图片尺寸，使用默认比例: 1:1")
+                    _dlog("[AUTO] 无法获取图片尺寸，使用默认比例: 1:1")
             else:
                 final_aspect_ratio = "1:1"
-                print("[AUTO] 无输入图片，使用默认比例: 1:1")
+                _dlog("[AUTO] 无输入图片，使用默认比例: 1:1")
 
         # 根据mode决定是否使用图像
         use_images = has_images and config["mode"] == "Img2Img"
@@ -993,29 +1004,29 @@ class GeminiBatchNode:
 
             # NanoBanana API响应格式 (包括grsai)
             if config["provider"] in ["BW"]:
-                print(f"[DEBUG] NanoBanana响应数据类型检查:")
-                print(f"  response_data类型: {type(response_data)}")
-                print(f"  response_data是字典: {isinstance(response_data, dict)}")
+                _dlog(f"[DEBUG] NanoBanana响应数据类型检查:")
+                _dlog(f"  response_data类型: {type(response_data)}")
+                _dlog(f"  response_data是字典: {isinstance(response_data, dict)}")
 
                 if isinstance(response_data, dict):
-                    print(f"  response_data内容: {response_data}")
+                    _dlog(f"  response_data内容: {response_data}")
                     code_value = response_data.get("code")
                     has_data = "data" in response_data
-                    print(f"  code值: {code_value} (类型: {type(code_value)})")
-                    print(f"  包含data字段: {has_data}")
+                    _dlog(f"  code值: {code_value} (类型: {type(code_value)})")
+                    _dlog(f"  包含data字段: {has_data}")
 
                     if code_value == 200 and has_data:
                         data_field = response_data["data"]
-                        print(f"  data字段类型: {type(data_field)}")
-                        print(f"  data字段内容: {data_field}")
+                        _dlog(f"  data字段类型: {type(data_field)}")
+                        _dlog(f"  data字段内容: {data_field}")
 
                         if isinstance(data_field, dict):
                             task_id = data_field.get("taskId")
-                            print(f"  提取的task_id: {task_id}")
+                            _dlog(f"  提取的task_id: {task_id}")
                         else:
                             # 处理data字段不是字典的情况
                             task_id = str(data_field) if data_field else None
-                            print(f"  data不是字典，转换为字符串task_id: {task_id}")
+                            _dlog(f"  data不是字典，转换为字符串task_id: {task_id}")
 
                         if task_id:
                             provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Comfly")
@@ -1067,9 +1078,9 @@ class GeminiBatchNode:
 
             # grsai API响应格式
             elif config["provider"] == "grsai":
-                print(f"[DEBUG] grsai响应数据类型检查:")
-                print(f"  response_data类型: {type(response_data)}")
-                print(f"  response_data内容: {response_data}")
+                _dlog(f"[DEBUG] grsai响应数据类型检查:")
+                _dlog(f"  response_data类型: {type(response_data)}")
+                _dlog(f"  response_data内容: {response_data}")
 
                 if isinstance(response_data, dict):
                     code_value = response_data.get("code")
@@ -1079,7 +1090,7 @@ class GeminiBatchNode:
                     if code_value == 0 and data_field:
                         if isinstance(data_field, dict):
                             task_id = data_field.get("id")
-                            print(f"  grsai提取的task_id: {task_id}")
+                            _dlog(f"  grsai提取的task_id: {task_id}")
 
                             if task_id:
                                 print(f"grsai: 任务{group_id} 异步任务已提交，task_id: {task_id}")
@@ -1714,7 +1725,7 @@ class GeminiBatchNode:
                             }
                     else:
                         # URL格式，直接返回URL，不下载图片
-                        print(f"[INFO] URL格式响应，直接返回链接: {image_url}")
+                        _dlog(f"[INFO] URL格式响应，直接返回链接: {image_url}")
                         # 简化task_info，避免返回完整的b64_json
                         simplified_task_info = {
                             "task_id": response_data.get("task_id", ""),
@@ -1778,7 +1789,7 @@ class GeminiBatchNode:
 
                     # 对于base64数据，如果能成功打开图片，说明数据完整
                     # 不需要额外的verify()验证（verify()会关闭图片对象）
-                    print(f"[SUCCESS] Base64图片处理成功")
+                    _dlog(f"[SUCCESS] Base64图片处理成功")
                     return img
 
                 else:
@@ -1794,7 +1805,7 @@ class GeminiBatchNode:
                         img_buffer.seek(0)  # 重置buffer位置
                         img = Image.open(img_buffer)  # 重新打开
 
-                        print(f"[SUCCESS] URL图片下载并验证成功，大小: {len(response.content)} bytes")
+                        _dlog(f"[SUCCESS] URL图片下载并验证成功，大小: {len(response.content)} bytes")
                         return img
                     else:
                         print(f"[ERROR] 图片下载失败，状态码: {response.status_code}")
@@ -1863,7 +1874,7 @@ class GeminiBatchNode:
                             ])
                     else:
                         # 无图片数据但有URL（URL格式），创建占位符图像
-                        print(f"[INFO] 任务{group_id} URL格式响应: {result['url']}")
+                        _dlog(f"[INFO] 任务{group_id} URL格式响应: {result['url']}")
                         # 为URL格式创建一个特殊的占位符图像，表示这是URL链接
                         url_placeholder = torch.full((1, 64, 64, 3), 0.5)  # 批次格式，灰色占位符，0-1范围
                         group_outputs.extend([
@@ -1898,12 +1909,12 @@ class GeminiBatchNode:
         # 合并输出images：返回图像列表
         if successful_images:
             merged_images = successful_images  # 直接返回列表，元素为 [1, H, W, C]
-            print(f"[DEBUG] 合并图像列表长度: {len(merged_images)}")
+            _dlog(f"[DEBUG] 合并图像列表长度: {len(merged_images)}")
         else:
             # 如果没有成功的图像，返回包含单个空图像（批次格式）的列表
             empty_image = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             merged_images = [empty_image]  # 包含单个空图像的列表（批次格式）
-            print(f"[DEBUG] 空合并图像列表 (占位符)")
+            _dlog(f"[DEBUG] 空合并图像列表 (占位符)")
 
         # urls和responses作为JSON字符串
         urls_json = json.dumps(all_urls, ensure_ascii=False)
@@ -1944,7 +1955,7 @@ class GeminiBatchNode:
 
             # 确保RGB模式
             if image.mode != "RGB":
-                print(f"[INFO] 转换图片模式: {image.mode} -> RGB")
+                _dlog(f"[INFO] 转换图片模式: {image.mode} -> RGB")
                 image = image.convert("RGB")
 
             # 检查图片尺寸
@@ -1954,7 +1965,7 @@ class GeminiBatchNode:
                 return None
 
             # 转换为numpy数组，保持0-255范围
-            print(f"[INFO] 转换图片尺寸: {width}x{height}")
+            _dlog(f"[INFO] 转换图片尺寸: {width}x{height}")
             np_img = np.array(image)
 
             # 检查数组形状
@@ -1965,7 +1976,7 @@ class GeminiBatchNode:
             # 转换为torch.Tensor，归一化到0-1范围，格式: [H, W, C] (ComfyUI标准格式)
             tensor = torch.from_numpy(np_img.astype(np.float32) / 255.0)
 
-            print(f"[SUCCESS] 图片转换为torch.Tensor成功，形状: {tensor.shape}")
+            _dlog(f"[SUCCESS] 图片转换为torch.Tensor成功，形状: {tensor.shape}")
             return tensor
 
         except Exception as e:
@@ -1993,9 +2004,9 @@ class GeminiBatchNode:
 
 # 节点注册映射
 NODE_CLASS_MAPPINGS = {
-    "GeminiBatch": GeminiBatchNode
+    "laowang_GeminiBatch": GeminiBatchNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "GeminiBatch": "laowang_GeminiBatch"
+    "laowang_GeminiBatch": "laowang_GeminiBatch"
 }

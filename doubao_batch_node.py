@@ -13,16 +13,27 @@ from PIL import Image
 import io
 import base64
 
+import os as _os
+
+_DEBUG = _os.environ.get("LAOWANG_MYAPI_DEBUG", "0") == "1"
+
+
+def _dlog(*args, **kwargs):
+    """调试日志开关，默认关闭。设置 LAOWANG_MYAPI_DEBUG=1 启用。"""
+    if _DEBUG:
+        print(*args, **kwargs)
+
+
 
 def _calculate_aspect_ratio(width: int, height: int) -> str:
     """计算图片的宽高比，返回最接近的NanoBanana支持的比例"""
     # 验证输入参数
     if width is None or height is None or width <= 0 or height <= 0:
-        print(f"[警告] 无效的图片尺寸 width={width}, height={height}，使用默认比例 1:1")
+        _dlog(f"[警告] 无效的图片尺寸 width={width}, height={height}，使用默认比例 1:1")
         return "1:1"
 
     ratio = width / height
-    print(f"[调试] 计算宽高比: {width}/{height} = {ratio:.6f}")
+    _dlog(f"[调试] 计算宽高比: {width}/{height} = {ratio:.6f}")
 
     # 定义NanoBanana支持的比例及其阈值
     supported_ratios = {
@@ -44,12 +55,12 @@ def _calculate_aspect_ratio(width: int, height: int) -> str:
 
     for ratio_name, target_ratio in supported_ratios.items():
         diff = abs(ratio - target_ratio)
-        print(f"[调试] 比例 {ratio_name} ({target_ratio:.6f}): 差值 = {diff:.6f}")
+        _dlog(f"[调试] 比例 {ratio_name} ({target_ratio:.6f}): 差值 = {diff:.6f}")
         if diff < min_diff:
             min_diff = diff
             best_ratio = ratio_name
 
-    print(f"[调试] 最终匹配比例: {best_ratio} (差值 = {min_diff:.6f})")
+    _dlog(f"[调试] 最终匹配比例: {best_ratio} (差值 = {min_diff:.6f})")
     return best_ratio
 
 
@@ -250,34 +261,34 @@ class DoubaoBatchNode:
 
         try:
             # ===== 调试信息: 输入参数详情 =====
-            print("\n[DEBUG] DoubaoBatchNode 执行开始 =====")
-            print(f"[INFO] 节点启用状态: {kwargs.get('node_enabled', True)}")
-            print(f"[INFO] 基础URL: {kwargs.get('base_url', 'N/A')}")
-            print(f"[INFO] API密钥: {'已配置' if kwargs.get('api_key') else '未配置'}")
-            print(f"[INFO] 模型: {kwargs.get('model', 'N/A')}")
-            print(f"[INFO] 图片尺寸: {kwargs.get('img_size', 'N/A')}")
-            print(f"[INFO] 图片数量: {kwargs.get('img_n', 'N/A')}")
-            print(f"[INFO] 宽高比: {kwargs.get('aspect_ratio', 'N/A')}")
-            print(f"[INFO] 响应格式: {kwargs.get('response_format', 'N/A')}")
-            print(f"[INFO] 水印: {kwargs.get('watermark', 'N/A')}")
-            print(f"[INFO] 流式输出: {kwargs.get('stream', 'N/A')}")
-            print(f"[INFO] 并发数: {kwargs.get('concurrency', 'N/A')}")
-            print(f"[INFO] 超时时间: {kwargs.get('timeout', 'N/A')}")
-            print(f"[INFO] 重试次数: {kwargs.get('max_retries', 'N/A')}")
+            _dlog("\n[DEBUG] DoubaoBatchNode 执行开始 =====")
+            _dlog(f"[INFO] 节点启用状态: {kwargs.get('node_enabled', True)}")
+            _dlog(f"[INFO] 基础URL: {kwargs.get('base_url', 'N/A')}")
+            _dlog(f"[INFO] API密钥: {'已配置' if kwargs.get('api_key') else '未配置'}")
+            _dlog(f"[INFO] 模型: {kwargs.get('model', 'N/A')}")
+            _dlog(f"[INFO] 图片尺寸: {kwargs.get('img_size', 'N/A')}")
+            _dlog(f"[INFO] 图片数量: {kwargs.get('img_n', 'N/A')}")
+            _dlog(f"[INFO] 宽高比: {kwargs.get('aspect_ratio', 'N/A')}")
+            _dlog(f"[INFO] 响应格式: {kwargs.get('response_format', 'N/A')}")
+            _dlog(f"[INFO] 水印: {kwargs.get('watermark', 'N/A')}")
+            _dlog(f"[INFO] 流式输出: {kwargs.get('stream', 'N/A')}")
+            _dlog(f"[INFO] 并发数: {kwargs.get('concurrency', 'N/A')}")
+            _dlog(f"[INFO] 超时时间: {kwargs.get('timeout', 'N/A')}")
+            _dlog(f"[INFO] 重试次数: {kwargs.get('max_retries', 'N/A')}")
 
             # 显示各组的输入状态
-            print("\n[DEBUG] 各组输入状态:")
+            _dlog("\n[DEBUG] 各组输入状态:")
             for group in range(1, 11):
                 has_images = any(kwargs.get(f"image_{group}.{i}") is not None for i in range(1, 11))
                 prompt = kwargs.get(f"prompt_{group}")
-                print(f"  组{group}: 图片={has_images}, 提示词={'有' if prompt else '无'}")
+                _dlog(f"  组{group}: 图片={has_images}, 提示词={'有' if prompt else '无'}")
 
             # 解析输入参数
             config = self._parse_config(kwargs)
             tasks = self._parse_tasks(kwargs, config)
 
-            print(f"\n📊 解析结果: 共{len(tasks)}个任务, 其中{len([t for t in tasks if t['is_valid']])}个有效")
-            print("=" * 50)
+            _dlog(f"\n📊 解析结果: 共{len(tasks)}个任务, 其中{len([t for t in tasks if t['is_valid']])}个有效")
+            _dlog("=" * 50)
 
             # 过滤有效任务
             valid_tasks = [task for task in tasks if task["is_valid"]]
@@ -308,17 +319,17 @@ class DoubaoBatchNode:
                     results = future.result()
 
             # ===== 调试信息: 执行结果详情 =====
-            print("\n[DEBUG] DoubaoBatchNode 执行结果汇总:")
-            print(f"  [INFO] 总任务数: {len(valid_tasks)}")
-            print(f"  [SUCCESS] 成功任务: {len([r for r in results if r.get('success', False)])}")
-            print(f"  [ERROR] 失败任务: {len([r for r in results if not r.get('success', False)])}")
+            _dlog("\n[DEBUG] DoubaoBatchNode 执行结果汇总:")
+            _dlog(f"  [INFO] 总任务数: {len(valid_tasks)}")
+            _dlog(f"  [SUCCESS] 成功任务: {len([r for r in results if r.get('success', False)])}")
+            _dlog(f"  [ERROR] 失败任务: {len([r for r in results if not r.get('success', False)])}")
 
             for i, result in enumerate(results, 1):
                 status = "[SUCCESS]" if result.get("success", False) else "[ERROR]"
-                print(f"  任务{i}: {status} {result.get('info', '无信息')}")
+                _dlog(f"  任务{i}: {status} {result.get('info', '无信息')}")
 
-            print("\n[DEBUG] 准备返回最终输出...")
-            print("=" * 50)
+            _dlog("\n[DEBUG] 准备返回最终输出...")
+            _dlog("=" * 50)
 
             # 处理结果
             return self._process_results(results)
@@ -475,13 +486,13 @@ class DoubaoBatchNode:
         api_url, headers, payload = self._build_api_request(task, config)
 
         # ===== 调试信息: API请求详情 =====
-        print(f"\n[DEBUG] 任务{task['group_id']} API请求构建:")
-        print(f"  [URL] 请求URL: {api_url}")
-        print(f"  [HEADERS] 请求头: {headers}")
-        print(f"  [PAYLOAD] 请求体: {self._mask_b64_json(payload)}")
-        print(f"  [IMAGES] 参考图片数量: {len(task['images'])}")
-        print(f"  [PROMPT] 提示词: {task['prompt'][:100]}{'...' if len(task['prompt']) > 100 else ''}")
-        print("-" * 30)
+        _dlog(f"\n[DEBUG] 任务{task['group_id']} API请求构建:")
+        _dlog(f"  [URL] 请求URL: {api_url}")
+        _dlog(f"  [HEADERS] 请求头: {headers}")
+        _dlog(f"  [PAYLOAD] 请求体: {self._mask_b64_json(payload)}")
+        _dlog(f"  [IMAGES] 参考图片数量: {len(task['images'])}")
+        _dlog(f"  [PROMPT] 提示词: {task['prompt'][:100]}{'...' if len(task['prompt']) > 100 else ''}")
+        _dlog("-" * 30)
 
         # 发送请求
         try:
@@ -494,12 +505,12 @@ class DoubaoBatchNode:
                 result_data = response.json()
 
                 # ===== 调试信息: API响应详情 =====
-                print(f"[SUCCESS] 任务{task['group_id']} API响应成功:")
-                print(f"  [STATUS] 响应状态码: {response.status_code}")
-                print(f"  [RESPONSE] 响应数据: {result_data}")
+                _dlog(f"[SUCCESS] 任务{task['group_id']} API响应成功:")
+                _dlog(f"  [STATUS] 响应状态码: {response.status_code}")
+                _dlog(f"  [RESPONSE] 响应数据: {result_data}")
                 response_mode = "异步" if "task_id" in result_data else "同步"
-                print(f"  [MODE] 响应模式: {response_mode}")
-                print("-" * 30)
+                _dlog(f"  [MODE] 响应模式: {response_mode}")
+                _dlog("-" * 30)
 
                 # 检查是否是异步响应（包含task_id）还是同步响应（直接包含data）
                 if "task_id" in result_data:
@@ -604,13 +615,13 @@ class DoubaoBatchNode:
                 width, height = _get_image_size_with_exif(first_image)
                 if width and height:
                     final_aspect_ratio = _calculate_aspect_ratio(width, height)
-                    print(f"[AUTO] 根据输入图片({width}x{height})计算比例: {final_aspect_ratio}")
+                    _dlog(f"[AUTO] 根据输入图片({width}x{height})计算比例: {final_aspect_ratio}")
                 else:
                     final_aspect_ratio = "1:1"
-                    print("[AUTO] 无法获取图片尺寸，使用默认比例: 1:1")
+                    _dlog("[AUTO] 无法获取图片尺寸，使用默认比例: 1:1")
             else:
                 final_aspect_ratio = "1:1"
-                print("[AUTO] 无输入图片，使用默认比例: 1:1")
+                _dlog("[AUTO] 无输入图片，使用默认比例: 1:1")
 
         # 根据aspect_ratio调整prompt，添加比例描述
         # 注意：即使是1:1比例也需要明确指定，否则豆包可能使用默认比例(3:4)
@@ -630,7 +641,7 @@ class DoubaoBatchNode:
             }
             ratio_desc = ratio_descriptions.get(final_aspect_ratio, f"{final_aspect_ratio}比例")
             enhanced_prompt = f"{task['prompt']}，图片比例为{ratio_desc}"
-            print(f"[ASPECT_RATIO] 增强prompt添加比例描述: {ratio_desc}")
+            _dlog(f"[ASPECT_RATIO] 增强prompt添加比例描述: {ratio_desc}")
 
         # 根据mode决定是否使用图像
         use_images = has_images and config["mode"] == "Img2Img"
@@ -663,9 +674,9 @@ class DoubaoBatchNode:
             }
             if final_aspect_ratio in size_recommendations and config["img_size"] in size_recommendations[final_aspect_ratio]:
                 final_size = size_recommendations[final_aspect_ratio][config["img_size"]]
-                print(f"[SIZE] 使用推荐像素值: {final_size} (基于{config['img_size']}和比例{final_aspect_ratio})")
+                _dlog(f"[SIZE] 使用推荐像素值: {final_size} (基于{config['img_size']}和比例{final_aspect_ratio})")
             else:
-                print(f"[SIZE] 使用字符串尺寸: {final_size} (比例{final_aspect_ratio}无推荐值)")
+                _dlog(f"[SIZE] 使用字符串尺寸: {final_size} (比例{final_aspect_ratio}无推荐值)")
 
         # 基础payload - 遵循Seedream-4.5原生接口
         payload = {
@@ -1021,7 +1032,7 @@ class DoubaoBatchNode:
 
                     # 对于base64数据，如果能成功打开图片，说明数据完整
                     # 不需要额外的verify()验证（verify()会关闭图片对象）
-                    print(f"[SUCCESS] Doubao Base64图片处理成功")
+                    _dlog(f"[SUCCESS] Doubao Base64图片处理成功")
                     return img
 
                 else:
@@ -1037,7 +1048,7 @@ class DoubaoBatchNode:
                         img_buffer.seek(0)  # 重置buffer位置
                         img = Image.open(img_buffer)  # 重新打开
 
-                        print(f"[SUCCESS] Doubao URL图片下载并验证成功，大小: {len(response.content)} bytes")
+                        _dlog(f"[SUCCESS] Doubao URL图片下载并验证成功，大小: {len(response.content)} bytes")
                         return img
                     else:
                         print(f"[ERROR] Doubao图片下载失败，状态码: {response.status_code}")
@@ -1106,7 +1117,7 @@ class DoubaoBatchNode:
                             ])
                     else:
                         # 无图片数据但有URL（URL格式），创建占位符图像
-                        print(f"[INFO] Doubao任务{group_id} URL格式响应: {result['url']}")
+                        _dlog(f"[INFO] Doubao任务{group_id} URL格式响应: {result['url']}")
                         # 为URL格式创建一个特殊的占位符图像（批次格式），表示这是URL链接
                         url_placeholder = torch.full((1, 64, 64, 3), 0.5)  # 批次格式，灰色占位符，0-1范围
                         successful_images.append(url_placeholder)
@@ -1143,14 +1154,14 @@ class DoubaoBatchNode:
         if successful_images:
             # successful_images 中每个元素已经是批次格式 [1,H,W,C]
             merged_images = successful_images  # List of tensors
-            print(f"[DEBUG] Doubao合并图像列表长度: {len(merged_images)}")
+            _dlog(f"[DEBUG] Doubao合并图像列表长度: {len(merged_images)}")
             for i, img in enumerate(merged_images):
-                print(f"  图片{i+1} 形状: {img.shape}")
+                _dlog(f"  图片{i+1} 形状: {img.shape}")
         else:
             # 如果没有成功的图像，返回包含单个占位符（批次格式）的列表
             empty_image = torch.full((1, 64, 64, 3), 0.5)  # 灰色占位符 [1, H, W, C]
             merged_images = [empty_image]
-            print(f"[DEBUG] Doubao空合并图像列表 (占位符)")
+            _dlog(f"[DEBUG] Doubao空合并图像列表 (占位符)")
 
         # urls和responses作为JSON字符串
         urls_json = json.dumps(all_urls, ensure_ascii=False)
@@ -1202,7 +1213,7 @@ class DoubaoBatchNode:
 
             # 确保RGB模式
             if image.mode != "RGB":
-                print(f"[INFO] Doubao转换图片模式: {image.mode} -> RGB")
+                _dlog(f"[INFO] Doubao转换图片模式: {image.mode} -> RGB")
                 image = image.convert("RGB")
 
             # 检查图片尺寸
@@ -1212,7 +1223,7 @@ class DoubaoBatchNode:
                 return None
 
             # 转换为numpy数组，保持0-255范围
-            print(f"[INFO] Doubao转换图片尺寸: {width}x{height}")
+            _dlog(f"[INFO] Doubao转换图片尺寸: {width}x{height}")
             np_img = np.array(image)
 
             # 检查数组形状
@@ -1223,7 +1234,7 @@ class DoubaoBatchNode:
             # 转换为torch.Tensor，归一化到0-1范围，格式: [H, W, C] (ComfyUI标准格式)
             tensor = torch.from_numpy(np_img.astype(np.float32) / 255.0)
 
-            print(f"[SUCCESS] Doubao图片转换为torch.Tensor成功，形状: {tensor.shape}")
+            _dlog(f"[SUCCESS] Doubao图片转换为torch.Tensor成功，形状: {tensor.shape}")
             return tensor
 
         except Exception as e:
@@ -1251,9 +1262,9 @@ class DoubaoBatchNode:
 
 # 节点注册映射
 NODE_CLASS_MAPPINGS = {
-    "DoubaoBatch": DoubaoBatchNode
+    "laowang_DoubaoBatch": DoubaoBatchNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DoubaoBatch": "laowang_DoubaoBatch"
+    "laowang_DoubaoBatch": "laowang_DoubaoBatch"
 }

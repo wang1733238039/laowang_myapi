@@ -1,0 +1,7 @@
+# AIYang ComfyUI API Nodes Requirements
+# 这些依赖在ComfyUI环境中通常已预装
+
+torch>=1.12.0          # PyTorch (ComfyUI自带)
+numpy>=1.21.0          # 数值计算
+Pillow>=9.0.0          # 图像处理
+requests>=2.25.0       # HTTP请求

@@ -1,4 +1,4 @@
-# AIYang ComfyUI API Nodes
+# laowang ComfyUI API Nodes
 
 基于ComfyUI的自定义节点，支持多种AI图像生成API的并发调用。采用模块化架构，按并发场景拆分为专门的节点，支持双供应商自动切换。
 
@@ -12,9 +12,9 @@
 
 - **🏗️ 模块化架构**: 按并发场景拆分为专门的节点，避免功能混乱
 - **⚡ 三种并发模式**:
-  - 多组图 + 单模型并发 (AIYang007_Banana2Batch)
-  - 多组图 + 豆包模型并发 (AIYang007_DoubaoBatch)
-  - 单组图 + 多模型比较 (AIYang007_ModelCompare)
+  - 多组图 + 单模型并发 (laowang_GeminiBatch)
+  - 多组图 + 豆包模型并发 (laowang_DoubaoBatch)
+  - 单组图 + 多模型比较 (laowang_ModelCompare)
 - **🔄 三供应商支持**: Comfly + BW + grsai，自动适配API格式
 - **🧠 智能任务调度**: 自动识别有效任务，支持文生图、图生图模式
 - **🛡️ 完善的错误处理**: 支持超时重试，详细的状态反馈和错误隔离
@@ -26,7 +26,7 @@
    ```
    ComfyUI/
    ├── custom_nodes/
-   │   └── AIYang_comfyui_myapi/
+   │   └── laowang_comfyui_myapi/
    │       ├── __init__.py
    │       ├── banana2_batch_node.py
    │       ├── doubao_batch_node.py
@@ -44,11 +44,11 @@
    - 编辑`自留/config.py`文件，设置API密钥
    - 或在节点参数中直接输入API密钥
 
-4. **完全重启ComfyUI**（重要！），节点将自动加载到"AIYang007_myapi"分类中
+4. **完全重启ComfyUI**（重要！），节点将自动加载到"laowang_myapi"分类中
 
 ## 🚀 快速开始
 
-1. **选择节点**: 在ComfyUI中找到"AIYang007_Banana2Batch"节点
+1. **选择节点**: 在ComfyUI中找到"laowang_GeminiBatch"节点
 2. **配置供应商**: 设置provider为"comfly"、"BW"或"grsai"
 3. **输入API密钥**: 在api_key参数中填入对应的密钥
 4. **选择模型**: 根据供应商选择合适的模型
@@ -61,17 +61,17 @@
 
 | 节点名称 | 功能场景 | 并发模式 | 支持供应商 | 支持模型 |
 |---------|---------|---------|---------|---------|
-| **AIYang007_Banana2Batch** | 多组图 + 单模型并发 | 10组任务并发 | comfly, BW, grsai | nano-banana系列 |
-| **AIYang007_DoubaoBatch** | 多组图 + 单豆包模型并发 | 10组任务并发 | comfly | doubao-seedream系列 |
-| **AIYang007_ModelCompare** | 单组图 + 多模型比较 | 双模型并发 | comfly, BW | banana + doubao |
+| **laowang_GeminiBatch** | 多组图 + 单模型并发 | 10组任务并发 | comfly, BW, grsai | nano-banana系列 |
+| **laowang_DoubaoBatch** | 多组图 + 单豆包模型并发 | 10组任务并发 | comfly | doubao-seedream系列 |
+| **laowang_ModelCompare** | 单组图 + 多模型比较 | 双模型并发 | comfly, BW | banana + doubao |
 
 ### 节点位置
-在ComfyUI中搜索对应节点名称，或在 "AIYang007_myapi" 分类下找到节点
+在ComfyUI中搜索对应节点名称，或在 "laowang_myapi" 分类下找到节点
 
 ### 输入参数
 
-#### 图像输入 (40个插槽)
-- `image_1.1` 到 `image_10.4`: 每组最多4张参考图像
+#### 图像输入 (100个插槽)
+- `image_1.1` 到 `image_10.10`: 每组最多10张参考图像
 - 支持PNG、JPEG等常见图像格式
 
 #### 文本输入 (10个插槽)
@@ -92,7 +92,7 @@
 - `aspect_ratio`: 图像宽高比 ("auto", "1:1", "16:9"等)
 - `response_format`: 响应格式 ("url" 或 "b64_json")
 - `img_size`: 图片尺寸 ("1K", "2K", "4K")
-- `img_n`: 生成图片数量 (1-1，仅Banana2Batch支持)
+- `img_n`: 生成图片数量 (1-1，仅GeminiBatch支持)
 - `timeout`: 单次请求超时时间(秒) (默认: 200)
 - `retry_count`: 失败重试次数 (默认: 0)
 - `node_enabled`: 节点开关 (默认: True)
@@ -123,7 +123,7 @@
 
 ### 使用示例
 
-#### AIYang007_Banana2Batch (多组图 + 单模型并发)
+#### laowang_GeminiBatch (多组图 + 单模型并发)
 **适用场景**: 批量生成多个不同主题的图像
 
 1. 选择供应商: "comfly" 或 "BW"
@@ -132,12 +132,12 @@
    - BananaWebAPI: nano-banana系列模型
 3. 设置参数: aspect_ratio, img_size, timeout等
 4. 输入多组提示词: prompt_1 到 prompt_10
-5. 可选添加参考图像: image_1.1 到 image_10.4 (图生图模式)
+5. 可选添加参考图像: image_1.1 到 image_10.10 (图生图模式)
 6. 执行节点，获取10组并发结果
 
 **OSS上传**: 如果配置了OSS参数，图片会自动上传到OSS获取URL
 
-#### AIYang007_DoubaoBatch (多组图 + 单豆包模型并发)
+#### laowang_DoubaoBatch (多组图 + 单豆包模型并发)
 **适用场景**: 使用豆包模型批量生成高清图像
 
 1. 选择供应商: "comfly" (豆包模型只支持Comfly)
@@ -151,10 +151,10 @@
 5. 可选添加参考图像URL (豆包支持URL引用)
 6. 执行节点，获取豆包风格的批量高清图像
 
-#### AIYang007_ModelCompare (单组图 + 多模型比较)
+#### laowang_ModelCompare (单组图 + 多模型比较)
 **适用场景**: 比较不同模型的生成效果
 
-1. 输入单组参考图像和提示词 (image_1 到 image_4, prompt)
+1. 输入单组参考图像和提示词 (image_1 到 image_10, prompt)
 2. 配置两个模型:
    - 模型1: Comfly的nano-banana系列
    - 模型2: Comfly的doubao-seedream系列
@@ -175,7 +175,7 @@
 
 ### 架构设计
 采用**职责单一原则**，按并发场景拆分节点：
-- **Banana2Batch**: 专门处理Banana系列模型的批量并发
+- **GeminiBatch**: 专门处理Banana系列模型的批量并发
 - **DoubaoBatch**: 专门处理豆包模型的批量并发
 - **ModelCompare**: 专门处理单任务多模型比较
 
@@ -288,9 +288,9 @@
 
 ### 项目文件结构
 ```
-AIYang_comfyui_myapi/
+laowang_comfyui_myapi/
 ├── __init__.py                    # 节点注册和集成
-├── banana2_batch_node.py          # Comfly/BananaWebAPI批量并发节点
+├── banana2_batch_node.py          # Comfly/BananaWebAPI批量并发节点 (GeminiBatch)
 ├── doubao_batch_node.py           # 豆包批量并发节点
 ├── model_compare_node.py          # 模型比较节点
 ├── requirements.txt               # 依赖说明

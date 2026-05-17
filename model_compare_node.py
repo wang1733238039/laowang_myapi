@@ -91,7 +91,7 @@ class ModelCompareNode:
                     "tooltip": "供应商名称"
                 }),
                 "base_url1": ("STRING", {
-                    "default": "https://ai.comfly.chat",
+                    "default": "https://ai.comfly.org",
                     "tooltip": "API基础地址"
                 }),
                 "api_key1": ("STRING", {
@@ -129,7 +129,7 @@ class ModelCompareNode:
                     "tooltip": "供应商名称"
                 }),
                 "base_url2": ("STRING", {
-                    "default": "https://ai.comfly.chat",
+                    "default": "https://ai.comfly.org",
                     "tooltip": "API基础地址"
                 }),
                 "api_key2": ("STRING", {
@@ -400,7 +400,7 @@ class ModelCompareNode:
         # 构建两个模型的配置
         banana_config = {
             "provider": kwargs.get("provider1", "comfly"),
-            "base_url": kwargs.get("base_url1", "https://ai.comfly.chat"),
+            "base_url": kwargs.get("base_url1", "https://ai.comfly.org"),
             "api_key": kwargs.get("api_key1", ""),
             "model": kwargs.get("model1", "nano-banana-2"),
             "aspect_ratio": kwargs.get("aspect_ratio1", "auto"),
@@ -416,7 +416,7 @@ class ModelCompareNode:
 
         doubao_config = {
             "provider": kwargs.get("provider2", "comfly"),
-            "base_url": kwargs.get("base_url2", "https://ai.comfly.chat"),
+            "base_url": kwargs.get("base_url2", "https://ai.comfly.org"),
             "api_key": kwargs.get("api_key2", ""),
             "model": kwargs.get("model2", "doubao-seedream-4-5-251128"),
             "aspect_ratio": kwargs.get("aspect_ratio2", "auto"),

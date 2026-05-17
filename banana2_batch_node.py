@@ -200,7 +200,7 @@ class GeminiBatchNode:
                 "tooltip": "供应商名称"
             }),
             "base_url": ("STRING", {
-                "default": "https://ai.comfly.chat",
+                "default": "https://ai.comfly.org",
                 "tooltip": "API基础地址"
             }),
             "api_key": ("STRING", {
@@ -451,7 +451,7 @@ class GeminiBatchNode:
         """解析配置参数"""
         config = {
             "provider": kwargs.get("provider", "comfly"),
-            "base_url": kwargs.get("base_url", "https://ai.comfly.chat"),
+            "base_url": kwargs.get("base_url", "https://ai.comfly.org"),
             "api_key": kwargs.get("api_key", ""),
             "model": kwargs.get("model", "nano-banana-2"),
             "mode": kwargs.get("mode", "Img2Img"),

@@ -5,6 +5,7 @@ Banana2 ComfyUI Node
 
 import asyncio
 import json
+import random
 import time
 import requests
 import uuid
@@ -20,11 +21,67 @@ import os as _os
 
 _DEBUG = _os.environ.get("LAOWANG_MYAPI_DEBUG", "0") == "1"
 
+_RETRYABLE_HTTP_STATUS = {408, 425, 429, 500, 502, 503, 504}
+_RETRYABLE_ERROR_PATTERNS = (
+    "sslerror",
+    "ssl eof",
+    "unexpected_eof_while_reading",
+    "eof occurred in violation of protocol",
+    "connectionerror",
+    "connection reset",
+    "connection aborted",
+    "max retries exceeded",
+    "remotedisconnected",
+    "brokenpipeerror",
+    "connecttimeout",
+    "readtimeout",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "too many requests",
+)
+_NON_RETRYABLE_ERROR_PATTERNS = (
+    "invalid api key",
+    "unauthorized",
+    "forbidden",
+    "permission denied",
+    "insufficient balance",
+    "余额不足",
+    "内容违规",
+    "content policy",
+    "invalid parameter",
+    "参数错误",
+)
+
 
 def _dlog(*args, **kwargs):
     """调试日志开关，默认关闭。设置 LAOWANG_MYAPI_DEBUG=1 启用。"""
     if _DEBUG:
         print(*args, **kwargs)
+
+
+def _is_retryable_error(error_message: str = "", http_status: Optional[int] = None) -> bool:
+    """仅将临时网络错误、限流和服务端错误标记为可重试。"""
+    if http_status is not None:
+        return http_status in _RETRYABLE_HTTP_STATUS
+
+    error_lower = str(error_message).lower()
+    if any(pattern in error_lower for pattern in _NON_RETRYABLE_ERROR_PATTERNS):
+        return False
+    return any(pattern in error_lower for pattern in _RETRYABLE_ERROR_PATTERNS)
+
+
+def _retry_delay_seconds(failed_attempt_index: int) -> float:
+    """指数退避并加入抖动；首次失败等待约 3 秒，最大不超过 30 秒。"""
+    base_delay = min(3 * (2 ** failed_attempt_index), 30)
+    return base_delay + random.uniform(0, min(base_delay * 0.25, 3))
+
+
+class Banana2ExecutionError(RuntimeError):
+    """所有有效任务均失败时，让错误归属当前 API 节点。"""
 
 
 # OSS 上传相关导入
@@ -440,9 +497,31 @@ class GeminiBatchNode:
             _dlog("\n[DEBUG] 准备返回最终输出...")
             _dlog("=" * 50)
 
+            if results and all(not result.get("success", False) for result in results):
+                failures = []
+                for result in results:
+                    info = result.get("info", "")
+                    try:
+                        parsed_info = json.loads(info) if isinstance(info, str) else info
+                    except (TypeError, json.JSONDecodeError):
+                        parsed_info = {"message": str(info)}
+                    failures.append({
+                        "group_id": result.get("group_id"),
+                        "attempts": result.get("attempts", 1),
+                        "message": parsed_info.get("message", str(parsed_info)) if isinstance(parsed_info, dict) else str(parsed_info),
+                    })
+
+                raise Banana2ExecutionError(json.dumps({
+                    "status": "error",
+                    "message": "laowang_GeminiBatch 所有有效任务均失败",
+                    "failures": failures,
+                }, ensure_ascii=False))
+
             # 处理结果
             return self._process_results(results)
 
+        except Banana2ExecutionError:
+            raise
         except Exception as e:
             print(f"Banana2: 执行出错 - {str(e)}")
             return self._get_empty_outputs()
@@ -583,37 +662,90 @@ class GeminiBatchNode:
     async def _execute_single_task_with_retry(self, task: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         """执行单个任务（带重试）"""
         retry_count = config["retry_count"]
+        total_attempts = retry_count + 1
 
-        for attempt in range(retry_count + 1):
+        for attempt in range(total_attempts):
+            session = requests.Session()
             try:
-                result = await self._execute_single_task(task, config)
+                result = await self._execute_single_task(task, config, session)
+                result["attempts"] = attempt + 1
                 if result["success"]:
                     return result
-                elif attempt < retry_count:
-                    await asyncio.sleep(2)  # 重试间隔
-                    continue
-                else:
-                    return result
-            except Exception as e:
-                if attempt < retry_count:
-                    print(f"Banana2: 任务{task['group_id']}第{attempt+1}次尝试失败 - {str(e)}，准备重试")
-                    await asyncio.sleep(2)
-                    continue
-                else:
-                    print(f"Banana2: 任务{task['group_id']}最终失败 - {str(e)}")
-                    return {
-                        "group_id": task["group_id"],
-                        "success": False,
-                        "image": None,
-                        "url": "",
-                        "response_code": 2,
-                        "info": json.dumps({
-                    "status": "error",
-                    "message": f"重试{retry_count}次后仍然失败，最后一次错误: {str(e)}"
-                }, ensure_ascii=False)
-                    }
 
-    async def _execute_single_task(self, task: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+                retryable = bool(result.get("retryable", False))
+                error_message = self._result_error_message(result)
+                if not retryable:
+                    print(
+                        f"Banana2: 任务{task['group_id']}第{attempt + 1}/{total_attempts}次尝试失败"
+                        f"（不可重试）- {error_message}"
+                    )
+                    return result
+
+                if attempt >= retry_count:
+                    print(
+                        f"Banana2: 任务{task['group_id']}第{attempt + 1}/{total_attempts}次尝试失败，"
+                        f"已用尽重试次数 - {error_message}"
+                    )
+                    return result
+
+                delay = _retry_delay_seconds(attempt)
+                print(
+                    f"Banana2: 任务{task['group_id']}第{attempt + 1}/{total_attempts}次尝试失败"
+                    f"（临时错误）- {error_message}；{delay:.1f}秒后重试"
+                )
+                await asyncio.sleep(delay)
+            except Exception as e:
+                retryable = _is_retryable_error(str(e))
+                if retryable and attempt < retry_count:
+                    delay = _retry_delay_seconds(attempt)
+                    print(
+                        f"Banana2: 任务{task['group_id']}第{attempt + 1}/{total_attempts}次尝试异常"
+                        f"（临时错误）- {str(e)}；{delay:.1f}秒后重试"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                print(
+                    f"Banana2: 任务{task['group_id']}第{attempt + 1}/{total_attempts}次尝试异常，"
+                    f"{'已用尽重试次数' if retryable else '不可重试'} - {str(e)}"
+                )
+                return {
+                    "group_id": task["group_id"],
+                    "success": False,
+                    "image": None,
+                    "url": "",
+                    "response_code": 2,
+                    "attempts": attempt + 1,
+                    "retryable": retryable,
+                    "info": json.dumps({
+                        "status": "error",
+                        "message": f"请求异常: {str(e)}",
+                        "error_type": type(e).__name__,
+                    }, ensure_ascii=False)
+                }
+            finally:
+                session.close()
+
+        raise RuntimeError("unreachable retry loop")
+
+    @staticmethod
+    def _result_error_message(result: Dict[str, Any]) -> str:
+        info = result.get("info", "")
+        if isinstance(info, str):
+            try:
+                info = json.loads(info)
+            except json.JSONDecodeError:
+                return info
+        if isinstance(info, dict):
+            return str(info.get("message", info))
+        return str(info)
+
+    async def _execute_single_task(
+        self,
+        task: Dict[str, Any],
+        config: Dict[str, Any],
+        session: requests.Session,
+    ) -> Dict[str, Any]:
         """执行单个任务"""
         # 构建API请求
         api_url, headers, payload = self._build_api_request(task, config)
@@ -642,7 +774,12 @@ class GeminiBatchNode:
                 _dlog(f"[DEBUG] 任务{task['group_id']} 使用NanoBanana JSON格式发送请求")
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: self.session.post(api_url, headers=headers, json=payload, timeout=config["timeout"])
+                    lambda: session.post(
+                        api_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=(15, config["timeout"]),
+                    )
                 )
             elif has_images:
                 # Comfly图生图：multipart/form-data
@@ -662,14 +799,25 @@ class GeminiBatchNode:
 
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: self.session.post(api_url, headers=headers, data=request_data, files=files, timeout=config["timeout"])
+                    lambda: session.post(
+                        api_url,
+                        headers=headers,
+                        data=request_data,
+                        files=files,
+                        timeout=(15, config["timeout"]),
+                    )
                 )
             else:
                 # Comfly文生图：application/json
                 _dlog(f"[DEBUG] 任务{task['group_id']} 使用Comfly JSON格式发送请求")
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: self.session.post(api_url, headers=headers, json=payload, timeout=config["timeout"])
+                    lambda: session.post(
+                        api_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=(15, config["timeout"]),
+                    )
                 )
 
             _dlog(f"[DEBUG] 任务{task['group_id']} HTTP响应状态码: {response.status_code}")
@@ -713,19 +861,23 @@ class GeminiBatchNode:
                 # Comfly供应商和NanoBanana API使用异步模式
                 is_nanobanana_local = config["provider"] in ["BW", "grsai"]
                 if is_comfly_provider or is_nanobanana_local:
-                    return await self._handle_async_response(task["group_id"], result_data, config)
+                    return await self._handle_async_response(task["group_id"], result_data, config, session)
                 else:
                     # 其他供应商使用同步模式
                     return self._parse_sync_response(task["group_id"], result_data, config["response_format"])
             else:
                 print(f"[ERROR] 任务{task['group_id']} API请求失败 - {response.status_code}")
                 print(f"[ERROR] 响应内容: {response.text}")
+                retryable = _is_retryable_error(http_status=response.status_code)
                 return {
                     "group_id": task["group_id"],
                     "success": False,
                     "image": None,
                     "url": "",
                     "response_code": 2,
+                    "retryable": retryable,
+                    "stage": "submit",
+                    "http_status": response.status_code,
                     "info": json.dumps({
                         "status": "error",
                         "message": f"API请求失败 - {response.status_code}",
@@ -733,30 +885,52 @@ class GeminiBatchNode:
                     }, ensure_ascii=False)
                 }
 
-        except requests.exceptions.Timeout:
-            print(f"Banana2: 任务{task['group_id']} 请求超时")
+        except requests.exceptions.Timeout as e:
+            print(f"Banana2: 任务{task['group_id']} 请求超时 - {str(e)}")
             return {
                 "group_id": task["group_id"],
                 "success": False,
                 "image": None,
                 "url": "",
                 "response_code": 2,
+                "retryable": True,
+                "stage": "submit",
                 "info": json.dumps({
                     "status": "error",
-                    "message": f"请求超时 ({config['timeout']}秒)"
+                    "message": f"请求超时: {str(e)}",
+                    "error_type": type(e).__name__,
+                }, ensure_ascii=False)
+            }
+        except requests.exceptions.RequestException as e:
+            print(f"Banana2: 任务{task['group_id']} 请求异常 - {str(e)}")
+            retryable = _is_retryable_error(str(e))
+            return {
+                "group_id": task["group_id"],
+                "success": False,
+                "image": None,
+                "url": "",
+                "response_code": 2,
+                "retryable": retryable,
+                "stage": "submit",
+                "info": json.dumps({
+                    "status": "error",
+                    "message": f"请求异常: {str(e)}",
+                    "error_type": type(e).__name__,
                 }, ensure_ascii=False)
             }
         except Exception as e:
-            print(f"Banana2: 任务{task['group_id']} 请求异常 - {str(e)}")
+            print(f"Banana2: 任务{task['group_id']} 执行异常 - {str(e)}")
             return {
                 "group_id": task["group_id"],
                 "success": False,
                 "image": None,
                 "url": "",
                 "response_code": 2,
+                "retryable": False,
                 "info": json.dumps({
                     "status": "error",
-                    "message": f"请求异常: {str(e)}"
+                    "message": f"执行异常: {str(e)}",
+                    "error_type": type(e).__name__,
                 }, ensure_ascii=False)
             }
 
@@ -996,7 +1170,13 @@ class GeminiBatchNode:
 
             return api_url, headers, payload
 
-    async def _handle_async_response(self, group_id: int, response_data: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_async_response(
+        self,
+        group_id: int,
+        response_data: Dict[str, Any],
+        config: Dict[str, Any],
+        session: requests.Session,
+    ) -> Dict[str, Any]:
         """处理异步响应，获取task_id并轮询状态"""
         try:
             # 从响应中获取task_id
@@ -1032,7 +1212,7 @@ class GeminiBatchNode:
                             provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Comfly")
                             print(f"{provider_name}: 任务{group_id} 异步任务已提交，task_id: {task_id}")
                             # 开始轮询查询状态
-                            return await self._poll_task_status(group_id, task_id, config)
+                            return await self._poll_task_status(group_id, task_id, config, session)
                         else:
                             print(f"NanoBanana: 任务{group_id} 响应中未找到task_id")
                             return {
@@ -1095,7 +1275,7 @@ class GeminiBatchNode:
                             if task_id:
                                 print(f"grsai: 任务{group_id} 异步任务已提交，task_id: {task_id}")
                                 # 开始轮询查询状态
-                                return await self._poll_task_status(group_id, task_id, config)
+                                return await self._poll_task_status(group_id, task_id, config, session)
                         else:
                             print(f"grsai: 任务{group_id} data字段不是字典类型: {type(data_field)}")
 
@@ -1143,7 +1323,7 @@ class GeminiBatchNode:
                 provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Comfly")
                 print(f"{provider_name}: 任务{group_id} 异步任务已提交，task_id: {task_id}")
                 # 开始轮询查询状态
-                return await self._poll_task_status(group_id, task_id, config)
+                return await self._poll_task_status(group_id, task_id, config, session)
             else:
                 provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Comfly")
                 print(f"{provider_name}: 任务{group_id} 异步响应中未找到task_id: {response_data}")
@@ -1176,7 +1356,13 @@ class GeminiBatchNode:
                     }, ensure_ascii=False)
             }
 
-    async def _poll_task_status(self, group_id: int, task_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    async def _poll_task_status(
+        self,
+        group_id: int,
+        task_id: str,
+        config: Dict[str, Any],
+        session: requests.Session,
+    ) -> Dict[str, Any]:
         """轮询查询任务状态，每5秒查询一次"""
         import time
         base_url = config["base_url"].rstrip("/")
@@ -1213,12 +1399,12 @@ class GeminiBatchNode:
                 if query_method == "POST":
                     response = await asyncio.get_event_loop().run_in_executor(
                         None,
-                        lambda: self.session.post(query_url, headers=headers, json=query_body, timeout=30)
+                        lambda: session.post(query_url, headers=headers, json=query_body, timeout=(10, 30))
                     )
                 else:
                     response = await asyncio.get_event_loop().run_in_executor(
                         None,
-                        lambda: self.session.get(query_url, headers=headers, timeout=30)
+                        lambda: session.get(query_url, headers=headers, timeout=(10, 30))
                     )
 
                 if response.status_code == 200:

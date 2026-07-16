@@ -82,7 +82,7 @@
   - "comfly": Comfly平台 (默认)
   - "BW": BananaWebAPI平台
 - `base_url`: API基础地址
-  - Comfly: "https://ai.comfly.chat"
+  - Comfly: "https://ai.comfly.org"
   - BananaWebAPI: 对应平台的API地址
 - `api_key`: API密钥 (必填，支持直接输入)
 - `model`: 模型选择

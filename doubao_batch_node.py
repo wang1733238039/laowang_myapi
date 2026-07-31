@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 import io
 import base64
+import uuid
 
 import os as _os
 
@@ -573,13 +574,13 @@ class DoubaoBatchNode:
             upload_url = "https://ark.cn-beijing.volces.com/api/v3/images/uploads"
 
             headers = {
-                "Authorization": f"Bearer {config['api_key']}",
-                "Content-Type": "multipart/form-data"
+                "Authorization": f"Bearer {config['api_key']}"
             }
 
             # 构建multipart数据
+            filename = f"doubao_{uuid.uuid4().hex}.png"
             files = {
-                "file": ("image.png", image_bytes, "image/png")
+                "file": (filename, image_bytes, "image/png")
             }
 
             # 同步上传（豆包可能不支持异步上传）

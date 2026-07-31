@@ -1136,11 +1136,16 @@ class GeminiBatchNode:
             # 添加图像文件 - 支持多图
             # 存储为列表，稍后在发送时转换为正确的requests格式
             image_files = []
+            upload_batch_id = uuid.uuid4().hex
             for i, img in enumerate(task["images"]):
                 buffer = io.BytesIO()
                 img.save(buffer, format="PNG")
                 buffer.seek(0)
-                image_files.append((f"image_{i+1}.png", buffer, "image/png"))
+                filename = (
+                    f"banana_{upload_batch_id}_"
+                    f"g{task['group_id']:02d}_i{i + 1:02d}.png"
+                )
+                image_files.append((filename, buffer, "image/png"))
 
             files["image"] = image_files
 

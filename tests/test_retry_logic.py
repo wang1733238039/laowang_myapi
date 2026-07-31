@@ -1,13 +1,23 @@
 import asyncio
 import json
+import re
+import sys
 import unittest
 from unittest import mock
+
+from PIL import Image
+
+try:
+    import torch  # noqa: F401
+except ModuleNotFoundError:
+    sys.modules["torch"] = mock.MagicMock()
 
 from banana2_batch_node import (
     Banana2ExecutionError,
     GeminiBatchNode,
     _is_retryable_error,
 )
+from doubao_batch_node import DoubaoBatchNode
 
 
 def _result(success=False, retryable=False, message="error"):
@@ -114,6 +124,66 @@ class RetryExecutionTests(unittest.TestCase):
 
         self.assertIn("所有有效任务均失败", str(raised.exception))
         self.assertIn("SSL EOF", str(raised.exception))
+
+
+class MultipartFilenameTests(unittest.TestCase):
+    def setUp(self):
+        self.node = GeminiBatchNode()
+        self.task = {
+            "group_id": 3,
+            "images": [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2))],
+            "prompt": "test",
+        }
+        self.config = {
+            "provider": "zhifou",
+            "base_url": "https://zhiai.art/api",
+            "api_key": "test-key",
+            "model": "Nano Banana 2",
+            "mode": "Img2Img",
+            "aspect_ratio": "1:1",
+            "response_format": "url",
+            "img_size": "2K",
+            "img_n": 1,
+        }
+
+    def test_multipart_filenames_are_unique_per_request(self):
+        _, _, first_payload = self.node._build_api_request(self.task, self.config)
+        _, _, second_payload = self.node._build_api_request(self.task, self.config)
+
+        first_names = [item[0] for item in first_payload["files"]["image"]]
+        second_names = [item[0] for item in second_payload["files"]["image"]]
+
+        self.assertEqual(len(set(first_names + second_names)), 4)
+        self.assertRegex(
+            first_names[0],
+            re.compile(r"^banana_[0-9a-f]{32}_g03_i01\.png$"),
+        )
+        self.assertRegex(
+            first_names[1],
+            re.compile(r"^banana_[0-9a-f]{32}_g03_i02\.png$"),
+        )
+
+
+class DoubaoUploadFilenameTests(unittest.TestCase):
+    def test_upload_filename_is_unique_and_requests_sets_boundary(self):
+        node = DoubaoBatchNode()
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {"data": {"url": "https://example.com/image.png"}}
+        node.session = mock.Mock()
+        node.session.post.return_value = response
+        image = Image.new("RGB", (2, 2))
+
+        asyncio.run(node._upload_image_to_doubao(image, {"api_key": "test-key"}))
+        first_call = node.session.post.call_args
+        first_name = first_call.kwargs["files"]["file"][0]
+
+        asyncio.run(node._upload_image_to_doubao(image, {"api_key": "test-key"}))
+        second_call = node.session.post.call_args
+        second_name = second_call.kwargs["files"]["file"][0]
+
+        self.assertNotEqual(first_name, second_name)
+        self.assertRegex(first_name, re.compile(r"^doubao_[0-9a-f]{32}\.png$"))
+        self.assertNotIn("Content-Type", first_call.kwargs["headers"])
 
 
 if __name__ == "__main__":

@@ -1436,7 +1436,6 @@ class GeminiBatchNode:
                             else:
                                 # 任务失败
                                 fail_reason = error_message or f"successFlag={success_flag}"
-                                retryable = _is_retryable_error(fail_reason)
                                 print(f"NanoBanana: 任务{group_id} 生成失败 - {fail_reason}")
                                 return {
                                     "group_id": group_id,
@@ -1444,8 +1443,6 @@ class GeminiBatchNode:
                                     "image": None,
                                     "url": "",
                                     "response_code": 2,
-                                    "retryable": retryable,
-                                    "stage": "poll",
                                     "info": json.dumps({
                                         "status": "error",
                                         "message": f"任务失败: {fail_reason}",
@@ -1469,7 +1466,6 @@ class GeminiBatchNode:
                             elif status == "failed":
                                 # 任务失败
                                 fail_reason = failure_reason or error_msg or "未知错误"
-                                retryable = _is_retryable_error(fail_reason)
                                 print(f"grsai: 任务{group_id} 生成失败 - {fail_reason}")
                                 return {
                                     "group_id": group_id,
@@ -1477,8 +1473,6 @@ class GeminiBatchNode:
                                     "image": None,
                                     "url": "",
                                     "response_code": 2,
-                                    "retryable": retryable,
-                                    "stage": "poll",
                                     "info": json.dumps({
                                         "status": "error",
                                         "message": f"任务失败: {fail_reason}",
@@ -1503,13 +1497,7 @@ class GeminiBatchNode:
 
                             elif status == "FAILURE":
                                 # 任务失败
-                                fail_reason = (
-                                    task_info.get("fail_reason")
-                                    or task_info.get("message")
-                                    or task_info.get("error")
-                                    or "未知错误"
-                                )
-                                retryable = _is_retryable_error(fail_reason)
+                                fail_reason = task_info.get("fail_reason", "未知错误")
                                 print(f"Banana2: 任务{group_id} 生成失败 - {fail_reason}")
                                 return {
                                     "group_id": group_id,
@@ -1517,13 +1505,7 @@ class GeminiBatchNode:
                                     "image": None,
                                     "url": "",
                                     "response_code": 2,
-                                    "retryable": retryable,
-                                    "stage": "poll",
-                                    "info": json.dumps({
-                                        "status": "error",
-                                        "message": f"任务失败: {fail_reason}",
-                                        "task_info": task_info,
-                                    }, ensure_ascii=False)
+                                    "info": json.dumps(task_info, ensure_ascii=False)
                                 }
 
                             elif status in ["IN_PROGRESS", "NOT_START", "PENDING"]:

@@ -125,6 +125,68 @@ class RetryExecutionTests(unittest.TestCase):
         self.assertIn("所有有效任务均失败", str(raised.exception))
         self.assertIn("SSL EOF", str(raised.exception))
 
+    def test_transient_poll_failure_retries_submission(self):
+        results = [
+            _result(retryable=True, message="任务失败: Timeout awaiting 'connect' for 20000ms"),
+            _result(success=True, message="ok"),
+        ]
+
+        async def fake_execute(task, config, session):
+            result = results.pop(0)
+            result["stage"] = "poll"
+            return result
+
+        with (
+            mock.patch.object(self.node, "_execute_single_task", side_effect=fake_execute) as execute,
+            mock.patch("banana2_batch_node.requests.Session", return_value=_FakeSession()),
+            mock.patch("banana2_batch_node._retry_delay_seconds", return_value=0),
+            mock.patch("banana2_batch_node.asyncio.sleep", new=mock.AsyncMock()),
+        ):
+            result = asyncio.run(
+                self.node._execute_single_task_with_retry(
+                    self.task,
+                    {"retry_count": 1},
+                )
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["attempts"], 2)
+        self.assertEqual(execute.await_count, 2)
+
+    def test_connect_timeout_is_retryable(self):
+        self.assertTrue(_is_retryable_error("Timeout awaiting 'connect' for 20000ms"))
+
+    def test_zhifou_poll_connect_timeout_is_marked_retryable(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {
+            "data": {
+                "status": "FAILURE",
+                "fail_reason": "Timeout awaiting 'connect' for 20000ms",
+            }
+        }
+        session = mock.Mock()
+        session.get.return_value = response
+
+        result = asyncio.run(
+            self.node._poll_task_status(
+                group_id=1,
+                task_id="task-id",
+                config={
+                    "provider": "zhifou",
+                    "base_url": "https://zhiai.art/api",
+                    "api_key": "test-key",
+                    "response_format": "url",
+                    "timeout": 60,
+                },
+                session=session,
+            )
+        )
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["stage"], "poll")
+        self.assertIn("Timeout awaiting 'connect'", result["info"])
+
 
 class MultipartFilenameTests(unittest.TestCase):
     def setUp(self):

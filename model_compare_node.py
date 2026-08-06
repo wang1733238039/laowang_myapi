@@ -16,6 +16,12 @@ import base64
 import os as _os
 
 _DEBUG = _os.environ.get("LAOWANG_MYAPI_DEBUG", "0") == "1"
+_EASYAI_PROVIDERS = {"zhifou", "zhiai", "easyai"}
+
+
+def _is_easyai_provider(provider: Any) -> bool:
+    """判断当前供应商是否使用 EasyAI/织否异步协议。"""
+    return str(provider or "").strip().lower() in _EASYAI_PROVIDERS
 
 
 def _dlog(*args, **kwargs):
@@ -493,8 +499,9 @@ class ModelCompareNode:
                 "status": 0
             }
 
-        # 根据provider选择处理逻辑
-        # BW和grsai供应商使用NanoBanana API，comfly供应商使用Comfly API
+        # 根据provider选择处理逻辑。
+        # BW/grsai 使用 NanoBanana API；comfly 和 EasyAI/织否走 GeminiBatchNode
+        # 的 OpenAI 兼容实现（包括 x-async + /v1/ai/result 轮询）。
         is_nanobanana_provider = provider in ["BW", "grsai"]
 
         if is_nanobanana_provider:
@@ -502,6 +509,8 @@ class ModelCompareNode:
             return await self._execute_nanobanana_model(task, config, kwargs)
         else:
             # banana API使用原逻辑
+            if _is_easyai_provider(provider):
+                _dlog(f"[EasyAI] {provider} 使用 GeminiBatchNode 异步协议")
             return await self._execute_comfly_only_model(task, config)
 
     async def _execute_comfly_only_model(self, task: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:

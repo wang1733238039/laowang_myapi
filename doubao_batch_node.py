@@ -18,6 +18,13 @@ import os as _os
 
 _DEBUG = _os.environ.get("LAOWANG_MYAPI_DEBUG", "0") == "1"
 
+_EASYAI_PROVIDERS = {"zhifou", "zhiai", "easyai"}
+
+
+def _is_easyai_provider(provider: Any) -> bool:
+    """判断当前供应商是否使用 EasyAI/织否异步协议。"""
+    return str(provider or "").strip().lower() in _EASYAI_PROVIDERS
+
 
 def _dlog(*args, **kwargs):
     """调试日志开关，默认关闭。设置 LAOWANG_MYAPI_DEBUG=1 启用。"""
@@ -421,8 +428,8 @@ class DoubaoBatchNode:
 
     async def _execute_tasks_async(self, tasks: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """异步执行所有任务"""
-        # 根据任务数量动态调整并发数，最大5个并发
-        max_concurrent = min(len(tasks), 5)
+        # 根据任务数量动态调整并发数，最多同时执行10组任务
+        max_concurrent = min(len(tasks), 10)
         semaphore = asyncio.Semaphore(max_concurrent)
         print(f"DoubaoBatch: 开始执行 {len(tasks)} 个任务，使用 {max_concurrent} 个并发")
 
@@ -485,6 +492,8 @@ class DoubaoBatchNode:
         """执行单个任务"""
         # 构建API请求
         api_url, headers, payload = self._build_api_request(task, config)
+        is_easyai_provider = _is_easyai_provider(config.get("provider"))
+        submit_timeout = min(config["timeout"], 60) if is_easyai_provider else config["timeout"]
 
         # ===== 调试信息: API请求详情 =====
         _dlog(f"\n[DEBUG] 任务{task['group_id']} API请求构建:")
@@ -499,11 +508,21 @@ class DoubaoBatchNode:
         try:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.session.post(api_url, headers=headers, json=payload, timeout=config["timeout"])
+                lambda: self.session.post(api_url, headers=headers, json=payload, timeout=submit_timeout)
             )
 
-            if response.status_code == 200:
-                result_data = response.json()
+            if 200 <= response.status_code < 300:
+                try:
+                    result_data = response.json()
+                except (TypeError, ValueError):
+                    return {
+                        "group_id": task["group_id"],
+                        "success": False,
+                        "image": None,
+                        "url": "",
+                        "response_code": 2,
+                        "info": f"JSON解析失败: {response.text[:10000]}"
+                    }
 
                 # ===== 调试信息: API响应详情 =====
                 _dlog(f"[SUCCESS] 任务{task['group_id']} API响应成功:")
@@ -514,7 +533,18 @@ class DoubaoBatchNode:
                 _dlog("-" * 30)
 
                 # 检查是否是异步响应（包含task_id）还是同步响应（直接包含data）
-                if "task_id" in result_data:
+                has_task_id = (
+                    isinstance(result_data, dict)
+                    and (
+                        result_data.get("task_id")
+                        or result_data.get("id")
+                        or (
+                            isinstance(result_data.get("data"), dict)
+                            and (result_data["data"].get("task_id") or result_data["data"].get("id"))
+                        )
+                    )
+                )
+                if has_task_id:
                     # 异步模式：获取task_id后轮询状态
                     return await self._handle_doubao_async_response(task["group_id"], result_data, config)
                 elif "data" in result_data and isinstance(result_data["data"], list):
@@ -604,6 +634,7 @@ class DoubaoBatchNode:
         """构建豆包API请求"""
         base_url = config["base_url"].rstrip("/")
         has_images = len(task["images"]) > 0
+        is_easyai_provider = _is_easyai_provider(config.get("provider"))
 
         # 处理aspect_ratio的auto模式
         final_aspect_ratio = config["aspect_ratio"]
@@ -652,10 +683,13 @@ class DoubaoBatchNode:
             "Content-Type": "application/json"
         }
 
-        # 豆包API基础URL - 支持异步模式
+        # API基础URL - Comfly 使用 query 参数，EasyAI/织否使用 x-async 请求头。
         api_url = f"{base_url}/v1/images/generations"
         if config.get("async_mode", True):  # 默认使用异步模式
-            api_url += "?async=true"
+            if is_easyai_provider:
+                headers["x-async"] = "true"
+            else:
+                api_url += "?async=true"
 
         # 根据img_size和计算出的比例确定最终的size参数
         final_size = config["img_size"]
@@ -735,14 +769,19 @@ class DoubaoBatchNode:
         try:
             # 从响应中获取task_id
             task_id = None
-            if "task_id" in response_data:
+            if isinstance(response_data, dict) and response_data.get("task_id"):
                 # 直接在响应根层级
                 task_id = response_data["task_id"]
-            elif "data" in response_data and isinstance(response_data["data"], str):
+            elif isinstance(response_data, dict) and response_data.get("id"):
+                task_id = response_data["id"]
+            elif isinstance(response_data, dict) and "data" in response_data and isinstance(response_data["data"], dict):
+                task_id = response_data["data"].get("task_id") or response_data["data"].get("id")
+            elif isinstance(response_data, dict) and "data" in response_data and isinstance(response_data["data"], str):
                 # 在data字段中
                 task_id = response_data["data"]
 
             if task_id:
+                task_id = str(task_id)
                 print(f"DoubaoBatch: 任务{group_id} 异步任务已提交，task_id: {task_id}")
                 # 开始轮询查询状态
                 return await self._poll_doubao_task_status(group_id, task_id, config)
@@ -843,6 +882,9 @@ class DoubaoBatchNode:
 
     async def _poll_doubao_task_status(self, group_id: int, task_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
         """轮询查询豆包任务状态，每5秒查询一次"""
+        if _is_easyai_provider(config.get("provider")):
+            return await self._poll_easyai_task_status(group_id, task_id, config)
+
         base_url = config["base_url"].rstrip("/").replace("?async=true", "")  # 移除async参数
         headers = {
             "Authorization": f"Bearer {config['api_key']}",
@@ -927,6 +969,33 @@ class DoubaoBatchNode:
             "response_code": 2,
             "info": f"异步查询超时，已等待{max_polls * 5}秒"
         }
+
+    async def _poll_easyai_task_status(self, group_id: int, task_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
+        """复用 GeminiBatchNode 的 EasyAI 轮询和结果解析实现。"""
+        try:
+            import importlib
+
+            try:
+                module = importlib.import_module("banana2_batch_node")
+            except Exception:
+                if __package__:
+                    module = importlib.import_module(".banana2_batch_node", package=__package__)
+                else:
+                    module = importlib.import_module("banana2_batch_node")
+
+            node = module.GeminiBatchNode()
+            return await node._poll_task_status(group_id, task_id, config, self.session)
+        except Exception as e:
+            print(f"DoubaoBatch: EasyAI 任务{group_id} 轮询异常 - {str(e)}")
+            return {
+                "group_id": group_id,
+                "success": False,
+                "image": None,
+                "url": "",
+                "response_code": 2,
+                "retryable": True,
+                "info": f"EasyAI轮询异常: {str(e)}"
+            }
 
     def _parse_doubao_success_response(self, group_id: int, task_info: Dict[str, Any], response_format: str) -> Dict[str, Any]:
         """解析豆包异步成功的响应 - 支持单图和组图"""

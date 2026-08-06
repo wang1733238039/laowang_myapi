@@ -56,6 +56,16 @@ _NON_RETRYABLE_ERROR_PATTERNS = (
     "参数错误",
 )
 
+# EasyAI/织否兼容 OpenAI 图片接口，但异步协议使用 x-async 请求头和
+# /v1/ai/result/{task_id} 查询接口。保留别名，兼容已有工作流配置。
+_EASYAI_PROVIDERS = {"zhifou", "zhiai", "easyai"}
+_EASYAI_TERMINAL_STATUSES = {"success", "failed", "rejected", "cancelled"}
+
+
+def _is_easyai_provider(provider: Any) -> bool:
+    """判断当前供应商是否使用 EasyAI/织否异步协议。"""
+    return str(provider or "").strip().lower() in _EASYAI_PROVIDERS
+
 
 def _dlog(*args, **kwargs):
     """调试日志开关，默认关闭。设置 LAOWANG_MYAPI_DEBUG=1 启用。"""
@@ -626,8 +636,9 @@ class GeminiBatchNode:
 
     async def _execute_tasks_async(self, tasks: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """异步执行所有任务"""
-        # 根据任务数量动态调整并发数，最大5个并发
-        max_concurrent = min(len(tasks), 5)
+        # 保持批量节点的核心能力：10组任务可以同时提交。EasyAI 使用短提交+独立轮询，
+        # 不再因为异步协议把并发降为1。
+        max_concurrent = min(len(tasks), 10)
         semaphore = asyncio.Semaphore(max_concurrent)
         print(f"Banana2: 开始执行 {len(tasks)} 个任务，使用 {max_concurrent} 个并发")
 
@@ -760,6 +771,9 @@ class GeminiBatchNode:
         _dlog("-" * 30)
 
         is_comfly_provider = config["provider"] == "comfly"
+        is_easyai_provider = _is_easyai_provider(config["provider"])
+        # EasyAI 异步提交应快速返回 task_id；限制提交阶段的读超时，生成等待由轮询负责。
+        submit_read_timeout = min(config["timeout"], 60) if is_easyai_provider else config["timeout"]
 
         # 发送请求
         try:
@@ -778,7 +792,7 @@ class GeminiBatchNode:
                         api_url,
                         headers=headers,
                         json=payload,
-                        timeout=(15, config["timeout"]),
+                        timeout=(15, submit_read_timeout),
                     )
                 )
             elif has_images:
@@ -804,7 +818,7 @@ class GeminiBatchNode:
                         headers=headers,
                         data=request_data,
                         files=files,
-                        timeout=(15, config["timeout"]),
+                        timeout=(15, submit_read_timeout),
                     )
                 )
             else:
@@ -816,14 +830,14 @@ class GeminiBatchNode:
                         api_url,
                         headers=headers,
                         json=payload,
-                        timeout=(15, config["timeout"]),
+                        timeout=(15, submit_read_timeout),
                     )
                 )
 
             _dlog(f"[DEBUG] 任务{task['group_id']} HTTP响应状态码: {response.status_code}")
             _dlog(f"[DEBUG] 响应头: {dict(response.headers)}")
 
-            if response.status_code == 200:
+            if 200 <= response.status_code < 300:
                 _dlog(f"[DEBUG] 任务{task['group_id']} 收到200响应，开始解析JSON...")
                 _dlog(f"[DEBUG] 响应内容长度: {len(response.text)} 字符")
                 _dlog(f"[DEBUG] Content-Type: {response.headers.get('Content-Type', 'N/A')}")
@@ -840,7 +854,10 @@ class GeminiBatchNode:
                     _dlog(f"[SUCCESS] 任务{task['group_id']} API响应成功:")
                     _dlog(f"  [STATUS] 响应状态码: {response.status_code}")
                     _dlog(f"  [RESPONSE] 响应数据: {result_data}")
-                    _dlog(f"  [MODE] 异步模式: {config['provider'] in ['BW', 'grsai'] or (config['provider'] == 'comfly' and 'nano-banana' in config['model'])}")
+                    _dlog(
+                        "  [MODE] 异步模式: "
+                        f"{is_easyai_provider or config['provider'] in ['BW', 'grsai'] or is_comfly_provider}"
+                    )
                     _dlog("-" * 30)
                 except json.JSONDecodeError as e:
                     print(f"[ERROR] 任务{task['group_id']} JSON解析失败: {str(e)}")
@@ -858,9 +875,9 @@ class GeminiBatchNode:
                         }, ensure_ascii=False)
                     }
 
-                # Comfly供应商和NanoBanana API使用异步模式
+                # Comfly、EasyAI 和 NanoBanana API 使用异步模式
                 is_nanobanana_local = config["provider"] in ["BW", "grsai"]
-                if is_comfly_provider or is_nanobanana_local:
+                if is_comfly_provider or is_easyai_provider or is_nanobanana_local:
                     return await self._handle_async_response(task["group_id"], result_data, config, session)
                 else:
                     # 其他供应商使用同步模式
@@ -939,6 +956,7 @@ class GeminiBatchNode:
         base_url = config["base_url"].rstrip("/")
         has_images = len(task["images"]) > 0
         is_comfly_provider = config["provider"] == "comfly"
+        is_easyai_provider = _is_easyai_provider(config["provider"])
         is_nanobanana = config["provider"] in ["BW", "grsai"]
 
         # 处理aspect_ratio的auto模式
@@ -1108,13 +1126,13 @@ class GeminiBatchNode:
 
             return api_url, headers, payload
 
-        # Comfly API (原有逻辑)
+        # Comfly / EasyAI API（OpenAI兼容图片接口）
         elif use_images:
             # 图生图 - 使用multipart/form-data
             api_url = f"{base_url}/v1/images/edits"
             query_params = ""
 
-            # Comfly供应商使用异步模式
+            # Comfly 使用 query 参数；EasyAI/织否要求请求头 x-async。
             if is_comfly_provider:
                 query_params = "?async=true"
                 api_url += query_params
@@ -1122,6 +1140,8 @@ class GeminiBatchNode:
             headers = {
                 "Authorization": f"Bearer {config['api_key']}"
             }
+            if is_easyai_provider:
+                headers["x-async"] = "true"
 
             # 构建multipart/form-data
             files = {}
@@ -1155,7 +1175,7 @@ class GeminiBatchNode:
             api_url = f"{base_url}/v1/images/generations"
             query_params = ""
 
-            # Comfly供应商使用异步模式
+            # Comfly 使用 query 参数；EasyAI/织否要求请求头 x-async。
             if is_comfly_provider:
                 query_params = "?async=true"
                 api_url += query_params
@@ -1164,6 +1184,8 @@ class GeminiBatchNode:
                 "Authorization": f"Bearer {config['api_key']}",
                 "Content-Type": "application/json"
             }
+            if is_easyai_provider:
+                headers["x-async"] = "true"
 
             payload = {
                 "model": config["model"],
@@ -1187,8 +1209,21 @@ class GeminiBatchNode:
             # 从响应中获取task_id
             task_id = None
 
+            # EasyAI/织否响应格式：提交响应通常为
+            # {"task_id": "...", "status": "submitted"}，也兼容 data.task_id。
+            if _is_easyai_provider(config["provider"]):
+                if isinstance(response_data, dict):
+                    task_id = response_data.get("task_id") or response_data.get("id")
+                    data_field = response_data.get("data")
+                    if isinstance(data_field, dict):
+                        task_id = task_id or data_field.get("task_id") or data_field.get("id")
+                    if task_id:
+                        task_id = str(task_id)
+                else:
+                    print(f"EasyAI: 任务{group_id} 响应数据不是字典类型: {type(response_data)}")
+
             # NanoBanana API响应格式 (包括grsai)
-            if config["provider"] in ["BW"]:
+            elif config["provider"] in ["BW"]:
                 _dlog(f"[DEBUG] NanoBanana响应数据类型检查:")
                 _dlog(f"  response_data类型: {type(response_data)}")
                 _dlog(f"  response_data是字典: {isinstance(response_data, dict)}")
@@ -1325,12 +1360,20 @@ class GeminiBatchNode:
                     task_id = response_data["data"]
 
             if task_id:
-                provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Comfly")
+                provider_name = (
+                    "EasyAI" if _is_easyai_provider(config["provider"])
+                    else ("NanoBanana" if config["provider"] in ["BW"]
+                          else ("grsai" if config["provider"] == "grsai" else "Comfly"))
+                )
                 print(f"{provider_name}: 任务{group_id} 异步任务已提交，task_id: {task_id}")
                 # 开始轮询查询状态
                 return await self._poll_task_status(group_id, task_id, config, session)
             else:
-                provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Comfly")
+                provider_name = (
+                    "EasyAI" if _is_easyai_provider(config["provider"])
+                    else ("NanoBanana" if config["provider"] in ["BW"]
+                          else ("grsai" if config["provider"] == "grsai" else "Comfly"))
+                )
                 print(f"{provider_name}: 任务{group_id} 异步响应中未找到task_id: {response_data}")
                 return {
                     "group_id": group_id,
@@ -1346,7 +1389,11 @@ class GeminiBatchNode:
                 }
 
         except Exception as e:
-            provider_name = "NanoBanana" if config["provider"] in ["BW"] else ("grsai" if config["provider"] == "grsai" else "Banana2")
+            provider_name = (
+                "EasyAI" if _is_easyai_provider(config["provider"])
+                else ("NanoBanana" if config["provider"] in ["BW"]
+                      else ("grsai" if config["provider"] == "grsai" else "Banana2"))
+            )
             print(f"{provider_name}: 任务{group_id} 处理异步响应异常 - {str(e)}")
             return {
                 "group_id": group_id,
@@ -1360,6 +1407,41 @@ class GeminiBatchNode:
                         "response_data": response_data
                     }, ensure_ascii=False)
             }
+
+    @staticmethod
+    def _extract_easyai_task_info(status_data: Any) -> Dict[str, Any]:
+        """归一化 EasyAI 查询响应的根层、queue_status 和 data 结构。"""
+        if not isinstance(status_data, dict):
+            return {}
+
+        task_info: Dict[str, Any] = {}
+        task_info.update(status_data)
+
+        queue_status = status_data.get("queue_status")
+        if isinstance(queue_status, dict):
+            task_info.update(queue_status)
+            queue_data = queue_status.get("data")
+            if isinstance(queue_data, dict):
+                task_info.update(queue_data)
+
+        data_field = status_data.get("data")
+        if isinstance(data_field, dict):
+            task_info.update(data_field)
+            nested_data = data_field.get("data")
+            if isinstance(nested_data, dict):
+                task_info.update(nested_data)
+
+        return task_info
+
+    @staticmethod
+    def _easyai_error_message(status_data: Any, task_info: Dict[str, Any]) -> str:
+        """从 EasyAI 失败响应中提取可读错误。"""
+        for source in (task_info, status_data if isinstance(status_data, dict) else {}):
+            for key in ("message", "original_error_message", "error", "detail"):
+                value = source.get(key)
+                if value:
+                    return str(value)
+        return "未知错误"
 
     async def _poll_task_status(
         self,
@@ -1376,8 +1458,10 @@ class GeminiBatchNode:
             "Content-Type": "application/json"
         }
 
-        timeout = config.get("timeout", 200)  # 获取用户设置的超时时间
-        max_polls = min(60, timeout // 5)  # 最多轮询次数，同时考虑超时时间
+        timeout = max(1, int(config.get("timeout", 200)))  # 获取用户设置的超时时间
+        poll_interval = 5
+        # 按完整 timeout 计算轮询次数，避免原先固定最多60次导致600秒配置实际只等300秒。
+        max_polls = max(1, int((timeout + poll_interval - 1) // poll_interval))
         poll_count = 0
         start_time = time.time()
 
@@ -1386,7 +1470,11 @@ class GeminiBatchNode:
 
             try:
                 # 构建查询URL - NanoBanana API使用不同的查询路径
-                if config["provider"] in ["BW"]:
+                if _is_easyai_provider(config["provider"]):
+                    query_url = f"{base_url}/v1/ai/result/{task_id}"
+                    query_method = "GET"
+                    query_body = None
+                elif config["provider"] in ["BW"]:
                     query_url = f"{base_url}/api/v1/nanobanana/record-info?taskId={task_id}"
                     query_method = "GET"
                     query_body = None
@@ -1412,8 +1500,48 @@ class GeminiBatchNode:
                         lambda: session.get(query_url, headers=headers, timeout=(10, 30))
                     )
 
-                if response.status_code == 200:
-                    status_data = response.json()
+                if 200 <= response.status_code < 300:
+                    try:
+                        status_data = response.json()
+                    except (TypeError, ValueError):
+                        status_data = {"raw": response.text[:10000]}
+
+                    if _is_easyai_provider(config["provider"]):
+                        task_info = self._extract_easyai_task_info(status_data)
+                        status = str(task_info.get("status", "")).strip().lower()
+                        progress = task_info.get("progress", "")
+                        print(
+                            f"EasyAI: 任务{group_id} 状态查询 [{poll_count}/{max_polls}] - "
+                            f"状态: {status or 'unknown'}, 进度: {progress}"
+                        )
+
+                        if status == "success":
+                            return self._parse_easyai_success_response(
+                                group_id, status_data, config["response_format"]
+                            )
+
+                        if status in _EASYAI_TERMINAL_STATUSES:
+                            fail_reason = self._easyai_error_message(status_data, task_info)
+                            print(f"EasyAI: 任务{group_id} 生成失败 - {fail_reason}")
+                            return {
+                                "group_id": group_id,
+                                "success": False,
+                                "image": None,
+                                "url": "",
+                                "response_code": 2,
+                                "retryable": False,
+                                "stage": "poll",
+                                "http_status": response.status_code,
+                                "info": json.dumps({
+                                    "status": "error",
+                                    "message": f"任务失败（{status}）: {fail_reason}",
+                                    "task_info": status_data,
+                                }, ensure_ascii=False)
+                            }
+
+                        # submitted/started/process 以及服务端暂未返回状态时继续查询。
+                        await asyncio.sleep(poll_interval)
+                        continue
 
                     if "data" in status_data:
                         task_info = status_data["data"]
@@ -1644,6 +1772,141 @@ class GeminiBatchNode:
                     "status": "error",
                     "message": f"异步响应解析异常: {str(e)}",
                     "response_data": task_info
+                }, ensure_ascii=False)
+            }
+
+    def _parse_easyai_success_response(
+        self,
+        group_id: int,
+        response_data: Dict[str, Any],
+        response_format: str,
+    ) -> Dict[str, Any]:
+        """解析 EasyAI 查询接口返回的图片 URL/base64。"""
+        try:
+            containers: List[Dict[str, Any]] = []
+            if isinstance(response_data, dict):
+                containers.append(response_data)
+                queue_status = response_data.get("queue_status")
+                if isinstance(queue_status, dict):
+                    containers.append(queue_status)
+                    if isinstance(queue_status.get("data"), dict):
+                        containers.append(queue_status["data"])
+                data_field = response_data.get("data")
+                if isinstance(data_field, dict):
+                    containers.append(data_field)
+
+            image_url = ""
+            for container in containers:
+                output_content = container.get("output_content")
+                if isinstance(output_content, list):
+                    for item in output_content:
+                        if isinstance(item, str):
+                            image_url = item
+                        elif isinstance(item, dict):
+                            image_url = item.get("url", "") or item.get("content", "")
+                            if not image_url and item.get("b64_json"):
+                                image_url = f"data:image/png;base64,{item['b64_json']}"
+                        if image_url:
+                            break
+                if image_url:
+                    break
+
+                output = container.get("output")
+                if isinstance(output, list) and output:
+                    item = output[0]
+                    if isinstance(item, str):
+                        image_url = item
+                    elif isinstance(item, dict):
+                        image_url = item.get("url", "") or item.get("content", "")
+                        if not image_url and item.get("b64_json"):
+                            image_url = f"data:image/png;base64,{item['b64_json']}"
+                    if image_url:
+                        break
+
+            if not image_url:
+                print(f"EasyAI: 任务{group_id} 成功但响应中没有图片结果 - {response_data}")
+                return {
+                    "group_id": group_id,
+                    "success": False,
+                    "image": None,
+                    "url": "",
+                    "response_code": 2,
+                    "retryable": False,
+                    "stage": "poll",
+                    "info": json.dumps({
+                        "status": "error",
+                        "message": "任务成功但响应中没有图片结果",
+                        "response_data": response_data,
+                    }, ensure_ascii=False)
+                }
+
+            task_info = self._extract_easyai_task_info(response_data)
+            task_summary = {
+                "task_id": task_info.get("task_id", ""),
+                "status": task_info.get("status", "success"),
+                "progress": task_info.get("progress", 100),
+            }
+
+            if image_url.startswith("data:image"):
+                image = self._download_image(image_url)
+                if image is None:
+                    return {
+                        "group_id": group_id,
+                        "success": False,
+                        "image": None,
+                        "url": "",
+                        "response_code": 2,
+                        "retryable": False,
+                        "stage": "poll",
+                        "info": json.dumps({
+                            "status": "error",
+                            "message": "EasyAI 返回的 base64 图片无法解析",
+                            "task_info": task_summary,
+                        }, ensure_ascii=False)
+                    }
+                print(f"EasyAI: 任务{group_id} 图像生成成功 (Base64)")
+                return {
+                    "group_id": group_id,
+                    "success": True,
+                    "image": image,
+                    "url": "b64_ok" if response_format == "b64_json" else image_url,
+                    "response_code": 1,
+                    "info": json.dumps({
+                        "status": "success",
+                        "message": "图像生成成功",
+                        "format": "base64" if response_format == "b64_json" else "url",
+                        "task_info": task_summary,
+                    }, ensure_ascii=False)
+                }
+
+            print(f"EasyAI: 任务{group_id} 图像生成成功 (URL): {image_url}")
+            return {
+                "group_id": group_id,
+                "success": True,
+                "image": None,
+                "url": image_url,
+                "response_code": 1,
+                "info": json.dumps({
+                    "status": "success",
+                    "message": "图像生成成功",
+                    "format": "url",
+                    "task_info": task_summary,
+                }, ensure_ascii=False)
+            }
+        except Exception as e:
+            print(f"EasyAI: 任务{group_id} 响应解析异常 - {str(e)}")
+            return {
+                "group_id": group_id,
+                "success": False,
+                "image": None,
+                "url": "",
+                "response_code": 2,
+                "retryable": False,
+                "stage": "poll",
+                "info": json.dumps({
+                    "status": "error",
+                    "message": f"EasyAI 响应解析异常: {str(e)}",
+                    "response_data": response_data,
                 }, ensure_ascii=False)
             }
 

@@ -164,8 +164,8 @@ class DoubaoBatchNode:
             "timeout": ("INT", {
                 "default": 200,
                 "min": 10,
-                "max": 600,
-                "tooltip": "每一次请求超时(秒) ，如果超时不管是否返回结果，立即判定超时"
+                "max": 3600,
+                "tooltip": "任务最长等待时间(秒)，异步任务会按此时长轮询；EasyAI 建议设置 1200-1800 秒"
             }),
             "seed": ("INT", {
                 "default": 0,
@@ -891,7 +891,9 @@ class DoubaoBatchNode:
             "Content-Type": "application/json"
         }
 
-        max_polls = 60  # 最多轮询60次（5分钟）
+        timeout = max(1, int(config.get("timeout", 200)))
+        poll_interval = 5
+        max_polls = max(1, int((timeout + poll_interval - 1) // poll_interval))
         poll_count = 0
 
         while poll_count < max_polls:
@@ -936,38 +938,38 @@ class DoubaoBatchNode:
 
                         elif status in ["IN_PROGRESS", "NOT_START", "PENDING"]:
                             # 任务进行中，继续等待
-                            await asyncio.sleep(5)  # 等待5秒
+                            await asyncio.sleep(poll_interval)
                             continue
 
                         else:
                             print(f"DoubaoBatch: 任务{group_id} 未知状态: {status}")
-                            await asyncio.sleep(5)
+                            await asyncio.sleep(poll_interval)
                             continue
 
                     else:
                         print(f"DoubaoBatch: 任务{group_id} 状态查询响应格式错误: {status_data}")
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(poll_interval)
                         continue
 
                 else:
                     print(f"DoubaoBatch: 任务{group_id} 状态查询失败 - {response.status_code}: {response.text}")
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(poll_interval)
                     continue
 
             except Exception as e:
                 print(f"DoubaoBatch: 任务{group_id} 状态查询异常 - {str(e)}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(poll_interval)
                 continue
 
         # 超时
-        print(f"DoubaoBatch: 任务{group_id} 查询超时，已等待{max_polls * 5}秒")
+        print(f"DoubaoBatch: 任务{group_id} 查询超时，已等待约{timeout}秒")
         return {
             "group_id": group_id,
             "success": False,
             "image": None,
             "url": "",
             "response_code": 2,
-            "info": f"异步查询超时，已等待{max_polls * 5}秒"
+            "info": f"异步查询超时，已等待约{timeout}秒"
         }
 
     async def _poll_easyai_task_status(self, group_id: int, task_id: str, config: Dict[str, Any]) -> Dict[str, Any]:

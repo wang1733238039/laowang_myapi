@@ -312,8 +312,8 @@ class GeminiBatchNode:
             "timeout": ("INT", {
                 "default": 200,
                 "min": 10,
-                "max": 600,
-                "tooltip": "每一次请求超时(秒) ，如果超时不管是否返回结果，立即判定超时"
+                "max": 3600,
+                "tooltip": "任务最长等待时间(秒)，异步任务会按此时长轮询；EasyAI 建议设置 1200-1800 秒"
             }),
             "retry_count": ("INT", {
                 "default": 0,

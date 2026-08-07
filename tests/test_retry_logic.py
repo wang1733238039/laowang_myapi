@@ -57,6 +57,14 @@ class RetryClassificationTests(unittest.TestCase):
         self.assertFalse(_is_retryable_error(http_status=403))
 
 
+class TimeoutInputLimitTests(unittest.TestCase):
+    def test_all_nodes_allow_one_hour_timeout(self):
+        for node_class in (GeminiBatchNode, DoubaoBatchNode, ModelCompareNode):
+            timeout_config = node_class.INPUT_TYPES()["required"]["timeout"][1]
+            self.assertEqual(timeout_config["min"], 10)
+            self.assertEqual(timeout_config["max"], 3600)
+
+
 class RetryExecutionTests(unittest.TestCase):
     def setUp(self):
         self.node = GeminiBatchNode()
@@ -415,6 +423,22 @@ class OtherNodeEasyAIAsyncTests(unittest.TestCase):
             )
 
         self.assertTrue(result["success"])
+
+    def test_doubao_non_easyai_polling_uses_configured_timeout(self):
+        node = DoubaoBatchNode()
+        response = mock.Mock(status_code=500, text="temporary failure")
+        node.session = mock.Mock()
+        node.session.get.return_value = response
+        config = dict(self.config, provider="comfly", timeout=11)
+
+        with mock.patch("doubao_batch_node.asyncio.sleep", new=mock.AsyncMock()):
+            result = asyncio.run(
+                node._poll_doubao_task_status(1, "task-123", config)
+            )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(node.session.get.call_count, 3)
+        self.assertIn("11秒", result["info"])
 
     def test_doubao_easyai_shared_poller_runs_with_fake_result(self):
         node = DoubaoBatchNode()
